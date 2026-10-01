@@ -16,8 +16,11 @@ exec unshare --mount --propagation private -- /bin/bash -euc '
 host=$1; shift
 for d in dev proc sys; do mount --rbind "/$d" "$host/$d"; done
 mount -t tmpfs tmpfs "$host/run"
-mkdir -p "$host/run/systemd/resolve"
-mount --bind /run/systemd/resolve "$host/run/systemd/resolve"
+# DNS for apt and docker inside, when systemd-resolved is up. Nothing here is required.
+if [ -d /run/systemd/resolve ]; then
+	mkdir -p "$host/run/systemd/resolve"
+	mount --bind /run/systemd/resolve "$host/run/systemd/resolve"
+fi
 # The running docker daemon, for docker commands inside (the image build pulls mentatd from it).
 if [ -S /run/docker.sock ]; then touch "$host/run/docker.sock"; mount --bind /run/docker.sock "$host/run/docker.sock"; fi
 # Ubuntu bashrc puts $debian_chroot in the prompt.

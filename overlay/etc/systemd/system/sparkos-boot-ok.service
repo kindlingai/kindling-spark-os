@@ -5,10 +5,15 @@
 Description=Mark this spark-os boot as good for GRUB
 After=multi-user.target
 ConditionPathIsMountPoint=/run/sparkos/host
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/enter-dgx-os grub-editenv /boot/grub/grubenv unset recordfail
+# A bare chroot: grub-editenv needs nothing bound, so this cannot fail on anything enter-dgx-os sets
+# up. If it does fail, the next boot goes to DGX OS, so it retries every 15 s until it succeeds.
+ExecStart=/usr/sbin/chroot /run/sparkos/host /usr/bin/grub-editenv /boot/grub/grubenv unset recordfail
+Restart=on-failure
+RestartSec=15
 
 [Install]
 WantedBy=multi-user.target
