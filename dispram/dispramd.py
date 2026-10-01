@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Hand out slices of the GB10 display carveout as CUDA-importable fds.
 
 The RM reports a 2046 MiB DISPLAY_FRM carveout that nothing allocates from on GB10. Root can wrap

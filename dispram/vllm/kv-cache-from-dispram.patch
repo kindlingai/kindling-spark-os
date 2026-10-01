@@ -1,9 +1,9 @@
 kv-cache-from-dispram.patch: put vLLM's KV cache tail in the GB10 display carveout (dispram).
 
-SPDX-License-Identifier: AGPL-3.0-or-later OR CC0-1.0
-This patch is yours under either license: AGPL-3.0-or-later (../LICENSE) or CC0-1.0
-(../LICENSE-CC0). If you use it, please credit dispram from kindlingai/kindling-spark-os. Under CC0
-that is a request, not a condition.
+SPDX-License-Identifier: GPL-3.0-or-later WITH LicenseRef-dispram-bundling-exception
+GPL-3.0-or-later (../LICENSE-GPL) with the dispram bundling exception (../BUNDLING-EXCEPTION): you
+may bundle this patch into vLLM or an image under that work's own license, as long as the patch and
+your changes to it stay under these terms.
 
 Targets vLLM ddd6fbca. Apply with: patch -p1 -d <site-packages> < kv-cache-from-dispram.patch
 

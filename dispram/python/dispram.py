@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH LicenseRef-dispram-bundling-exception
+# GPL-3.0-or-later (../LICENSE-GPL) with the dispram bundling exception (../BUNDLING-EXCEPTION):
+# you may bundle this file into vLLM or an image under that work's own license, as long as this file
+# and your changes to it stay under these terms.
 """Client for dispramd: build device buffers whose tail lives in the GB10 display carveout.
 
 glued_zeros(nbytes, device) returns a zeroed int8 CUDA tensor of nbytes. Its front is ordinary

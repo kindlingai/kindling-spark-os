@@ -1,0 +1,22 @@
+dispram bundling exception
+
+Additional permission under section 7 of the GNU General Public License, version 3 (the "GPL").
+
+The files covered by this exception are dispram's client and vLLM integration:
+python/dispram.py, python/dispram_vllm.py and vllm/kv-cache-from-dispram.patch (the "Covered
+Files"). They are licensed under the GPL, version 3 or (at your option) any later version.
+
+As a special exception, the copyright holders give you permission to combine the Covered Files with
+other software, and to distribute the result (for example vLLM with the patch applied, or a
+container image with the client and plugin installed) under the terms of that software's own
+license, without that license having to be the GPL, provided that:
+
+  1. the Covered Files, including any changes you make to them, stay under the GPL with this
+     exception, and you meet the GPL's terms for them, including offering their source code; and
+  2. you keep their copyright notices and this exception with them.
+
+The rest of dispram, including dispramd.py and rmlist.c, is not covered by this exception and
+stays under the GNU Affero General Public License, version 3 (LICENSE).
+
+If you modify the Covered Files, you may extend this exception to your version, but you are not
+obliged to. If you do not wish to, delete this exception statement from your version.

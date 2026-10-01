@@ -51,7 +51,7 @@ COPY --from=mentatd /usr/local/bin/mentatd /usr/local/bin/mentatd-probe-machine 
 COPY --from=build /out/librmlist.so /opt/kindling/dispram/
 COPY --from=build /out/agent-lib /opt/kindling/agent/lib
 COPY --from=build /spark-agent/agent/spark-agent.py /spark-agent/agent/spark-memory.py /opt/kindling/agent/
-COPY dispram/dispramd.py dispram/LICENSE dispram/LICENSE-CC0 dispram/README.md /opt/kindling/dispram/
+COPY dispram/dispramd.py dispram/LICENSE dispram/LICENSE-GPL dispram/BUNDLING-EXCEPTION dispram/README.md /opt/kindling/dispram/
 COPY dispram/python /opt/kindling/dispram/python
 COPY dispram/vllm /opt/kindling/dispram/vllm
 COPY overlay /opt/kindling/overlay

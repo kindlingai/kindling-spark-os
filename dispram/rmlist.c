@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Describe a physical range to the RM as a memory-list object and export it as an opaque fd that
 // CUDA can import (cudaExternalMemoryHandleTypeOpaqueFd).
 #include <errno.h>

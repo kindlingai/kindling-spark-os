@@ -128,8 +128,8 @@ Anything specific to one fleet goes in a site layer, so this repo carries no fle
 
 `dispramd` lends the 2 GiB display carveout, which the driver never uses on GB10, to CUDA processes
 as ordinary device memory. A patch for vLLM, and a plugin for stock images, put the tail of the KV
-cache there. See [dispram/README.md](dispram/README.md). It is its own AGPL-3.0 directory, except
-that the vLLM patch and plugin are also available under CC0-1.0.
+cache there. See [dispram/README.md](dispram/README.md). The server side is AGPL-3.0. The client,
+vLLM plugin and patch are GPL-3.0 with a bundling exception, so they can ship inside vLLM or any image.
 
 ## Licensing
 

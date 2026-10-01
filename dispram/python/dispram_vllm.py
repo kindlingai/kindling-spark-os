@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later OR CC0-1.0
-# This vLLM plugin is yours under either license: AGPL-3.0-or-later (../LICENSE) or CC0-1.0
-# (../LICENSE-CC0). If you use it, please credit dispram from kindlingai/kindling-spark-os. Under
-# CC0 that is a request, not a condition.
+# SPDX-License-Identifier: GPL-3.0-or-later WITH LicenseRef-dispram-bundling-exception
+# GPL-3.0-or-later (../LICENSE-GPL) with the dispram bundling exception (../BUNDLING-EXCEPTION):
+# you may bundle this file into vLLM or an image under that work's own license, as long as this file
+# and your changes to it stay under these terms.
 """vLLM general plugin: grow the KV cache into the GB10 display carveout, for stock vLLM images.
 
 Workers add the carveout bytes dispramd can lend to their available KV memory, then build the one
