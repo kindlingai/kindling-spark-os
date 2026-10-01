@@ -15,6 +15,11 @@ dispramd answers anything else with an error and closes the connection.
 A connection's slices are freed when it closes, so a client holds its socket for as long as it
 uses the memory.
 
+Lent slices are also recorded in /run/dispram/lent.json with the borrowing process (its pid, from
+the socket's peer credentials, and its start time). A restarted dispramd reserves every recorded
+slice whose borrower is still running, and frees it when that process exits, so it never lends a
+slice that is still mapped. /run does not survive a reboot, and neither do the borrowers.
+
 The method leans on RM internals (the carveout-info control, memory-list objects, fd export), so it
 runs only on the driver release named in DISPRAM_DRIVER, the one its stack validated. On any other
 driver it exits with status 3.
@@ -24,11 +29,13 @@ import json
 import os
 import selectors
 import socket
+import struct
 import sys
 
 GRAN = 2 << 20
 KEY = "kindlingai_1"
 SOCK = os.environ.get("DISPRAM_SOCKET", "/run/dispram/dispram.sock")
+STATE = os.path.join(os.path.dirname(SOCK), "lent.json")
 LIB = os.environ.get("DISPRAM_LIB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "librmlist.so"))
 
 
@@ -69,6 +76,16 @@ class Carveout:
                 return s, size
         return None
 
+    def reserve(self, start, size):
+        """Take [start, start + size) out of the free list. Returns False if any of it is not free."""
+        if not self.inside(start, size):
+            return False
+        for i, (s, e) in enumerate(self.free):
+            if s <= start and start + size <= e:
+                self.free[i:i + 1] = [r for r in ((s, start), (start + size, e)) if r[0] < r[1]]
+                return True
+        return False
+
     def release(self, start, size):
         if not self.inside(start, size):
             raise RuntimeError(f"release of 0x{start:x} + {size}, outside DISPLAY_FRM")
@@ -85,6 +102,29 @@ class Carveout:
     def stats(self):
         sizes = [e - s for s, e in self.free]
         return {"base": self.base, "size": self.size, "free": sum(sizes), "largest": max(sizes, default=0)}
+
+
+def peer(conn):
+    """The (pid, start time) of the process at the other end of a Unix socket, or None."""
+    try:
+        pid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0]
+        return pid, start_time(pid)
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def start_time(pid):
+    """A process's start time in clock ticks since boot (field 22 of /proc/PID/stat), so a reused pid
+    is not mistaken for the process it replaced."""
+    with open(f"/proc/{pid}/stat") as f:
+        return int(f.read().rsplit(")", 1)[1].split()[19])
+
+
+def alive(pid, started):
+    try:
+        return start_time(pid) == started
+    except (OSError, IndexError, ValueError):
+        return False
 
 
 def check_driver():
@@ -113,13 +153,47 @@ def main():
     srv.listen()
     sel = selectors.DefaultSelector()
     sel.register(srv, selectors.EVENT_READ)
-    owned = {}  # conn -> [(start, size, rm handle)]
+    owned = {}  # conn -> [(start, size, rm handle, borrower)]
+    # Slices lent before a restart, whose borrowers still run: [(start, size, (pid, start time))].
+    inherited = []
+
+    def save():
+        rows = [{"start": s, "size": z, "pid": b[0], "started": b[1]}
+                for slices in owned.values() for s, z, _, b in slices if b]
+        rows += [{"start": s, "size": z, "pid": b[0], "started": b[1]} for s, z, b in inherited]
+        tmp = STATE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(rows, f)
+        os.replace(tmp, STATE)
+
+    try:
+        rows = json.load(open(STATE))
+    except (OSError, ValueError):
+        rows = []
+    for r in rows:
+        try:
+            start, size, b = int(r["start"]), int(r["size"]), (int(r["pid"]), int(r["started"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if alive(*b) and co.reserve(start, size):
+            inherited.append((start, size, b))
+            log(f"kept 0x{start:x} + {size >> 20} MiB, still mapped by pid {b[0]}")
+    save()
+
+    def reap():
+        """Free inherited slices whose borrowers have exited."""
+        for item in [i for i in inherited if not alive(*i[2])]:
+            inherited.remove(item)
+            co.release(item[0], item[1])
+            log(f"freed 0x{item[0]:x} + {item[1] >> 20} MiB, pid {item[2][0]} has exited")
+            save()
 
     def close(conn):
-        for start, size, handle in owned.pop(conn, []):
+        for start, size, handle, _ in owned.pop(conn, []):
             co.rm.rm_free(ctypes.c_uint(handle))
             co.release(start, size)
             log(f"freed 0x{start:x} + {size >> 20} MiB")
+        save()
         sel.unregister(conn)
         conn.close()
 
@@ -154,7 +228,8 @@ def main():
                 co.release(start, size)
                 reply(conn, {"ok": False, "error": "RM export failed"})
                 return True
-            owned[conn].append((start, size, handle.value))
+            owned[conn].append((start, size, handle.value, peer(conn)))
+            save()
             try:
                 reply(conn, {"ok": True, "base": start, "size": size}, [fd])
             finally:
@@ -165,15 +240,18 @@ def main():
         return True
 
     while True:
-        for key, _ in sel.select():
+        events = sel.select(timeout=10 if inherited else None)
+        if inherited:
+            reap()
+        for key, _ in events:
             if key.fileobj is srv:
                 conn, _ = srv.accept()
                 owned[conn] = []
                 sel.register(conn, selectors.EVENT_READ)
                 continue
             conn = key.fileobj
-            # One client's error closes that client and frees its slices. It must not take the
-            # daemon down: a restarted dispramd forgets every live slice and lends them again.
+            # One client's error closes that client and frees its slices, and leaves the daemon
+            # running.
             try:
                 msg = conn.recv(4096)
                 if msg and handle(conn, msg):
