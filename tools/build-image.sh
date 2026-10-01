@@ -7,6 +7,8 @@
 # Tags kindling-spark-os:<stack> and :<version>-<stack>, with + spelled - (Docker tags cannot hold
 # +), plus :latest and :<version> when STACK is the default. <version> is the repo's VERSION.
 set -euo pipefail
+# Docker access is root's on these boxes (DGX OS keeps users out of the docker group).
+docker info >/dev/null 2>&1 || [ "$(id -u)" = 0 ] || exec sudo -- "$0" "$@"
 cd "$(dirname "$0")/.."
 default=$(sed -n 's/^default: *//p' stacks.yaml)
 stack=${1:-$default}
