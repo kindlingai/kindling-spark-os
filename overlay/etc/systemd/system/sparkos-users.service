@@ -3,7 +3,8 @@
 [Unit]
 Description=Login users from the DGX OS install
 DefaultDependencies=no
-After=local-fs.target
+# After systemd-sysusers, which also rewrites /etc/passwd and /etc/group.
+After=local-fs.target systemd-sysusers.service
 Before=sysinit.target ssh.service systemd-logind.service systemd-user-sessions.service
 ConditionPathIsMountPoint=/run/sparkos/host
 

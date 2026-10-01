@@ -92,3 +92,5 @@ htop
 usbutils
 # recipes read their checkout's commit on the box
 git
+# a common login shell; sparkos-users gives users whose DGX OS shell is missing here /bin/bash
+zsh

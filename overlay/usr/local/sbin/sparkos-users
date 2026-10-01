@@ -4,15 +4,21 @@
 # The image itself only knows admin (uid 1000), the fallback login. Every box has its own users on
 # its DGX OS root, which the initramfs leaves at /run/sparkos/host:
 #   - regular users (uid 1000-59999) and their personal groups are copied in, replacing the image's
-#     entry of the same name, so passwords and shells set on DGX OS apply here too
-#   - their memberships in groups the image also has (sudo, docker, adm, ...) are merged by group name
+#     entry of the same name, so passwords set on DGX OS apply here too. A shell the image lacks
+#     (zsh, fish) becomes /bin/bash, or ssh would refuse the user.
+#   - a user DGX OS supplies gets exactly its DGX OS memberships in groups the image also has (sudo,
+#     docker, adm, ...), matched by group name, and none of the image's own: the image's admin rights
+#     never pass to a DGX OS user who happens to be called admin
 #   - the image's admin is dropped if a DGX OS user holds its uid under another name
-#   - /etc/sudoers.d files are copied, each only if visudo accepts it
+#   - /etc/sudoers.d files are copied, each only if visudo accepts it. The image's NOPASSWD rule for
+#     admin goes whenever admin is replaced or dropped.
+#   - /etc/subuid and /etc/subgid are not copied
 # Nothing here is baked into the image, so no password hash ever sits in an image file.
 set -eu
-# SPARKOS_HOST_ETC and SPARKOS_ETC point it at copies, for testing.
+# SPARKOS_HOST_ETC, SPARKOS_ETC and SPARKOS_ROOT point it at copies, for testing.
 H=${SPARKOS_HOST_ETC:-/run/sparkos/host/etc}
 E=${SPARKOS_ETC:-/etc}
+R=${SPARKOS_ROOT:-}
 [ -f "$H/passwd" ] || exit 0
 umask 077
 tmp=$(mktemp -d)
@@ -27,36 +33,61 @@ awk -F: 'NR == FNR { if ($3 >= 1000 && $3 < 60000) hostuid[$3] = $1; next }
 cat "$tmp/users" "$tmp/drop" > "$tmp/users_out"
 cat "$tmp/groups" "$tmp/drop" > "$tmp/groups_out"
 
-# replace FILE HOSTFILE NAMES: drop FILE's entries named in NAMES, then append HOSTFILE's entries for
-# the regular names, keeping FILE's mode and owner.
+# install_as FILE NEW: replace FILE with NEW's content through a copy beside it and a rename, keeping
+# FILE's mode and owner, so a reader never sees a half-written passwd.
+install_as() {
+	cp -p "$1" "$1.sparkos-new"
+	cat "$2" > "$1.sparkos-new"
+	mv -f "$1.sparkos-new" "$1"
+}
+
+# replace FILE HOSTFILE NAMES KEEP: drop FILE's entries named in NAMES, then append HOSTFILE's entries
+# for the names in KEEP.
 replace() {
 	[ -f "$1" ] && [ -f "$2" ] || return 0
 	awk -F: 'NR == FNR {skip[$1] = 1; next} !($1 in skip)' "$3" "$1" > "$tmp/new"
 	awk -F: 'NR == FNR {keep[$1] = 1; next} ($1 in keep)' "$4" "$2" >> "$tmp/new"
-	cat "$tmp/new" > "$1"
+	install_as "$1" "$tmp/new"
 }
 replace "$E/passwd" "$H/passwd" "$tmp/users_out" "$tmp/users"
+# Shells the image has. A DGX OS user's shell outside that list becomes /bin/bash.
+grep -v '^#' "$E/shells" 2>/dev/null | while read -r sh; do [ -x "$R$sh" ] && echo "$sh"; done > "$tmp/shells"
+awk -F: -v OFS=: '
+	FILENAME == ARGV[1] { ok[$1] = 1; next }
+	FILENAME == ARGV[2] { mine[$1] = 1; next }
+	($1 in mine) && !($7 in ok) && $7 !~ /(nologin|false)$/ {
+		print "sparkos-users: " $1 "'"'"'s shell " $7 " is not in this image; using /bin/bash" > "/dev/stderr"
+		$7 = "/bin/bash"
+	}
+	{ print }' "$tmp/shells" "$tmp/users" "$E/passwd" > "$tmp/passwd"
+install_as "$E/passwd" "$tmp/passwd"
 replace "$E/shadow" "$H/shadow" "$tmp/users_out" "$tmp/users"
 replace "$E/group" "$H/group" "$tmp/groups_out" "$tmp/groups"
 replace "$E/gshadow" "$H/gshadow" "$tmp/groups_out" "$tmp/groups"
 
-# Merge the regular users' supplementary memberships into the image's groups of the same name, and
-# take dropped users out of every member list.
+# Every name DGX OS supplies or this drops leaves every member list, then the DGX OS users get back
+# exactly their DGX OS memberships in groups the image also has.
 awk -F: -v OFS=: '
 	FILENAME == ARGV[1] { users[$1] = 1; next }
-	FILENAME == ARGV[2] { drop[$1] = 1; next }
+	FILENAME == ARGV[2] { strip[$1] = 1; next }
 	FILENAME == ARGV[3] { n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] in users) add[$1] = add[$1] "," m[i]; next }
 	{
-		n = split($4 add[$1], m, ","); $4 = ""
+		# The image'"'"'s own members, minus every name DGX OS supplies or this drops ...
+		n = split($4, m, ","); $4 = ""
 		for (i = 1; i <= n; i++)
-			if (m[i] != "" && !(m[i] in drop) && !(m[i] in seen)) { $4 = ($4 == "" ? m[i] : $4 "," m[i]); seen[m[i]] = 1 }
+			if (m[i] != "" && !(m[i] in strip) && !(m[i] in seen)) { $4 = ($4 == "" ? m[i] : $4 "," m[i]); seen[m[i]] = 1 }
+		# ... then the DGX OS users this group has on DGX OS.
+		n = split(add[$1], m, ",")
+		for (i = 1; i <= n; i++)
+			if (m[i] != "" && !(m[i] in seen)) { $4 = ($4 == "" ? m[i] : $4 "," m[i]); seen[m[i]] = 1 }
 		delete seen
 		print
-	}' "$tmp/users" "$tmp/drop" "$H/group" "$E/group" > "$tmp/group"
-cat "$tmp/group" > "$E/group"
+	}' "$tmp/users" "$tmp/users_out" "$H/group" "$E/group" > "$tmp/group"
+install_as "$E/group" "$tmp/group"
 
-# The fallback admin's sudo rule goes with it.
-grep -qx admin "$tmp/drop" && rm -f "$E/sudoers.d/90-admin-nopasswd"
+# The image's sudo rule for its fallback admin never applies to a DGX OS user. DGX OS's own rules for
+# its users are copied below.
+grep -qx admin "$tmp/users_out" && rm -f "$E/sudoers.d/90-admin-nopasswd"
 for f in "$H"/sudoers.d/*; do
 	[ -f "$f" ] || continue
 	case ${f##*/} in README|*~|*.*) continue ;; esac  # sudo skips these names too
