@@ -8,6 +8,9 @@
 Description=mentat node daemon
 After=network.target NetworkManager.service
 ConditionPathExists=/etc/spark/node.env
+# No start limit: if MENTAT_NODE_IP sits on a fabric port that comes up late (ConnectX hotplug), the
+# default 5 starts in 10 s would leave mentatd stopped for good. It retries every 2 s instead.
+StartLimitIntervalSec=0
 
 [Service]
 EnvironmentFile=/etc/spark/node.env
