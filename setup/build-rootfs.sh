@@ -99,6 +99,14 @@ mmdebstrap --mode=root --variant=minbase --architectures=arm64 --include="$pkgs"
   "deb [signed-by=/usr/share/keyrings/cuda_debian_prod.gpg] $cuda /"
 
 echo "$VERSION" > "$work/rootfs/etc/spark-os-version"
+# On the 64k kernel a PMD huge page is 512 MiB. When THP is enabled, khugepaged raises
+# vm.min_free_kbytes to hold a few free pageblocks of that size per zone, which the kernel caps at
+# 5% of RAM: 6.2 GiB on a 128 GiB box, where the 4k kernel keeps 44 MB. That costs more than the
+# 64k kernel's 2.1 GiB of smaller page tables gives back. 512 MiB THPs almost never form here, and
+# GPU memory does not use them, so THP is off and the reserve stays at the kernel's own ~45 MB.
+if [ "$FLAVOUR" = nvidia-64k ]; then
+  sed -i 's/$/ transparent_hugepage=never/' "$work/rootfs/etc/kernel/cmdline"
+fi
 cp "$work/rootfs/boot/vmlinuz-$kver" "$OUT/vmlinuz"
 cp "$work/rootfs/boot/initrd.img-$kver" "$OUT/initrd.img"
 cp "$work/rootfs/etc/kernel/cmdline" "$OUT/cmdline"

@@ -54,8 +54,8 @@ From a running spark-os, mount the DGX OS root disk instead:
 kernel and initramfs in `/boot/sparkos/VERSION/`, and adds a GRUB entry. `--trial` makes that entry
 the next boot, once. Reboot when ready.
 
-Options: `--flavour nvidia-64k` (default; 64 KiB pages return about 2 GiB on a 128 GiB box) or
-`nvidia`; `--version NAME`; `--site DIR` (below). `list` shows the installed images and GRUB's
+Options: `--flavour nvidia-64k` (default; 64 KiB pages return about 2 GiB on a 128 GiB box, with
+THP off so `vm.min_free_kbytes` does not grow to 5% of RAM) or `nvidia`; `--version NAME`; `--site DIR` (below). `list` shows the installed images and GRUB's
 state, `stack` the pair this setup image carries.
 
 ### Trial and promote

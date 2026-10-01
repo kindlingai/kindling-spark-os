@@ -21,7 +21,8 @@
 #       The kernel/driver pair this setup image carries.
 #
 # --flavour is nvidia (4 KiB pages) or nvidia-64k (64 KiB pages; its struct page array is 1/16
-# the size, which returns about 2 GiB on a 128 GiB box). Default: nvidia-64k.
+# the size, which returns about 2 GiB on a 128 GiB box, and it boots with THP off so the kernel's
+# free-memory reserve stays at ~45 MB rather than 5% of RAM). Default: nvidia-64k.
 #
 # --site DIR adds a site layer: DIR/root is copied over the image, DIR/packages.txt lists extra
 # packages, and DIR/customize.d/*.sh run inside the image after the base customize step. Default:
