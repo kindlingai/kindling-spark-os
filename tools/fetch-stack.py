@@ -5,7 +5,8 @@
 
 STACK may be "default". Writes OUT_DIR/*.deb, OUT_DIR/Packages and OUT_DIR/stack.env, which
 holds the shell variables the rest of the build reads: STACK, KERNEL_ABI, DRIVER,
-DRIVER_UPSTREAM, DRIVER_SERIES and FLAVOURS. Fails on any hash mismatch.
+DRIVER_UPSTREAM, DRIVER_SERIES, FLAVOURS, DISPRAM_VALIDATED and OGKM_COMMIT. Fails on any hash
+mismatch.
 """
 import hashlib
 import os
@@ -48,7 +49,8 @@ def main():
         f.write(f"STACK={stack_id}\nKERNEL_ABI={stack['kernel_abi']}\nDRIVER={driver}\n"
                 f"DRIVER_UPSTREAM={upstream}\nDRIVER_SERIES={upstream.split('.')[0]}\n"
                 f"FLAVOURS=\"{' '.join(stack['flavours'])}\"\n"
-                f"DISPRAM_VALIDATED={'1' if stack.get('validated', {}).get('dispram') else '0'}\n")
+                f"DISPRAM_VALIDATED={'1' if stack.get('validated', {}).get('dispram') else '0'}\n"
+                f"OGKM_COMMIT={stack['ogkm_commit']}\n")
     print(f"stack {stack_id}: {len(stack['debs'])} debs verified")
 
 

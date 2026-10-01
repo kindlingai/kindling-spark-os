@@ -27,6 +27,18 @@ apt_opts=(-o "Dir::Etc::SourceList=$state/etc/sources.list" -o "Dir::Etc::Source
           -o "Dir::Cache=$state/cache" -o "APT::Architecture=arm64" -o "APT::Install-Recommends=false")
 apt-get "${apt_opts[@]}" -qq update
 
+# The commit behind the driver's tag in NVIDIA/open-gpu-kernel-modules, through GitHub's API
+# because DGX OS has no git. The tag is annotated, so it points at a tag object, then the commit.
+ogkm=$(python3 - "$upstream" <<'PY'
+import json, sys, urllib.request
+api = "https://api.github.com/repos/NVIDIA/open-gpu-kernel-modules/git"
+obj = json.load(urllib.request.urlopen(f"{api}/ref/tags/{sys.argv[1]}"))["object"]
+while obj["type"] == "tag":
+    obj = json.load(urllib.request.urlopen(f"{api}/tags/{obj['sha']}"))["object"]
+print(obj["sha"])
+PY
+)
+
 kernel_pkgs=()
 for flavour in nvidia nvidia-64k; do
   k=$abi-$flavour
@@ -48,7 +60,8 @@ apt-get "${apt_opts[@]}" install --print-uris -qq -y "${kernel_pkgs[@]}" "${driv
     version=${version%_*}
     sha=$(apt-cache "${apt_opts[@]}" show "$name=$version" | awk '/^SHA256:/ && !seen {print $2; seen = 1}')
     printf '%s\t%s\t%s\t%s\n' "$name" "$version" "$url" "$sha"
-  done | sort -u | awk -F'\t' -v abi="$abi" -v drv="$driver" '
+  done | sort -u | awk -F'\t' -v abi="$abi" -v drv="$driver" -v ogkm="$ogkm" '
     BEGIN { split(drv, d, "-"); print abi "+" d[1] ":"; print "  kernel_abi: " abi; print "  driver: " drv
+            print "  ogkm_commit: " ogkm
             print "  flavours: [nvidia, nvidia-64k]"; print "  debs:" }
     { printf "    - {name: %s, version: \"%s\", url: \"%s\", sha256: %s}\n", $1, $2, $3, $4 }'
