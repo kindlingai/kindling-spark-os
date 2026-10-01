@@ -13,6 +13,8 @@
 #       the default until sparkos-promote is run from a booted image.
 #   build [--flavour F] [--version V] [--site DIR] [--out DIR]
 #       Build only, into --out (default /host/var/tmp/kindling-spark-os/VERSION).
+#   remove VERSION
+#       Delete an installed image and its GRUB entry. Refuses the image that is running.
 #   list
 #       The images installed on the box, and GRUB's default and next entries.
 #   stack
@@ -65,8 +67,7 @@ parse() {
     esac
   done
   case " $FLAVOURS " in *" $flavour "*) ;; *) die "flavour $flavour is not one of: $FLAVOURS" ;; esac
-  version=${version:-$(date -u +%Y%m%d-%H%M)-${KERNEL_ABI#*-}-${flavour#nvidia}}
-  version=${version%-}
+  version=${version:-$(date -u +%Y%m%d-%H%M)-${KERNEL_ABI#*-}${flavour#nvidia}}
   [[ $version =~ ^[A-Za-z0-9._-]+$ ]] || die "version may hold only letters, digits, '.', '_' and '-'"
   if [ -z "$site" ] && [ -d "$host/etc/kindling-spark-os/site" ]; then site=$host/etc/kindling-spark-os/site; fi
   out=${out:-$host/var/tmp/kindling-spark-os/$version}
@@ -120,10 +121,25 @@ list() {
   in_host grub-editenv list
 }
 
+remove() {
+  local version=${1:?usage: remove VERSION} d conf
+  d=$host/boot/sparkos/$version
+  conf=$d/entry.conf
+  [ -f "$conf" ] || die "no installed image $version"
+  if grep -q "sparkos=$(. "$conf"; echo "$IMAGE")\( \|$\)" /proc/cmdline; then
+    die "$version is the running image"
+  fi
+  rm -f "$host$(. "$conf"; echo "$IMAGE")"
+  rm -rf "$d"
+  in_host update-grub 2>&1 | grep -E "spark-os|done" || true
+  echo "removed spark-os $version"
+}
+
 cmd=${1:---help}; shift || true
 case $cmd in
   install) parse "$@"; build; install_image ;;
   build) parse "$@"; build; echo "built $out" ;;
+  remove) remove "$@" ;;
   list) list ;;
   stack) cat "$K/stack/stack.env" ;;
   -h|--help|help) sed -n '2,/^set -euo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//' ;;

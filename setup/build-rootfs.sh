@@ -67,6 +67,10 @@ if [ -n "${SITE:-}" ]; then
   fi
 fi
 
+# mmdebstrap runs apt from this container, so signed-by paths resolve here, not in the new root.
+install -m644 "$HOST/usr/share/keyrings/dgx_debian_prod.gpg" "$HOST/usr/share/keyrings/cuda_debian_prod.gpg" \
+  /usr/share/keyrings/
+
 ubuntu=http://ports.ubuntu.com/ubuntu-ports
 comps="main restricted universe"
 nvidia_baseos=https://repo.download.nvidia.com/baseos/ubuntu/noble/arm64/
@@ -98,6 +102,8 @@ echo "$VERSION" > "$work/rootfs/etc/spark-os-version"
 cp "$work/rootfs/boot/vmlinuz-$kver" "$OUT/vmlinuz"
 cp "$work/rootfs/boot/initrd.img-$kver" "$OUT/initrd.img"
 cp "$work/rootfs/etc/kernel/cmdline" "$OUT/cmdline"
-mkfs.erofs -zlz4hc "$OUT/spark-os.erofs" "$work/rootfs" >/dev/null
+# 4 KiB blocks whatever the build host's page size: the kernel reads lz4-compressed erofs with
+# 4 KiB blocks under both flavours, and mkfs would otherwise pick 64 KiB on a 64k host.
+mkfs.erofs -b 4096 -zlz4hc "$OUT/spark-os.erofs" "$work/rootfs" >/dev/null
 rm -rf "$work"
 ls -l "$OUT/spark-os.erofs"

@@ -64,6 +64,13 @@ stands aside when the patch is present. Run either way with:
 Under tensor parallelism, every rank should have dispram, because vLLM takes the smallest KV budget
 across ranks.
 
+## Prior work
+
+Independently discovered by the author of
+[this NVIDIA developer forum post](https://forums.developer.nvidia.com/t/deepseek-v4-1-flash-for-2x-dgx-spark-exl3-3bpw-3m-kv-cache-c6-new-2gb-free-ram-unlock-for-all-gb10s/383583),
+which describes a 2 GB free-RAM unlock for all GB10s and came first. dispram is a later,
+independent rediscovery.
+
 ## License
 
 AGPL-3.0 (`LICENSE`). `rmlist.c` includes NVIDIA's open-gpu-kernel-modules headers, which are MIT.
