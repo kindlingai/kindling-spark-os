@@ -15,11 +15,16 @@ name_of() {  # a short hostname for an IP, or the IP
 	echo "${n%%.*}" | grep . || echo "$1"
 }
 
+# kindling orange (xterm 208). The Linux console has 16 colours and shows its nearest one.
+BRAND=$(printf '\033[1;38;5;208m')
+RESET=$(printf '\033[0m')
+
 render() {
 	local cols st now
 	cols=$(tput cols 2>/dev/null || echo 80)
 	now=$(date '+%Y-%m-%d %H:%M:%S %Z')
-	printf '%s  spark-os %s  %s\n' "$(hostname)" "$(cat /etc/spark-os-version 2>/dev/null || echo '?')" "$now"
+	printf '%skindling%s spark-os %s  %s  %s\n' "$BRAND" "$RESET" \
+		"$(cat /etc/spark-os-version 2>/dev/null || echo '?')" "$(hostname)" "$now"
 	printf '%*s\n' "$cols" '' | tr ' ' -
 	printf 'up %s, load %s\n' "$(uptime -p | sed 's/^up //')" "$(cut -d' ' -f1-3 /proc/loadavg)"
 	ip -o -4 addr show scope global | awk '$2 !~ /^(docker|br-|veth)/ {printf "  %-16s %s\n", $2, $4}'
@@ -53,7 +58,7 @@ if [ "${1:-}" = --once ]; then render; exit 0; fi
 while :; do
 	clear
 	render
-	printf '\nEsc to log in - refreshes every %ss\n' "$REFRESH"
+	printf '\n%skindling%s - Esc to log in - refreshes every %ss\n' "$BRAND" "$RESET" "$REFRESH"
 	if IFS= read -rsn1 -t "$REFRESH" key; then
 		if [ "$key" = $'\e' ] || [ -z "$key" ]; then
 			clear
