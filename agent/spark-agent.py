@@ -526,16 +526,35 @@ def service_url(agent: dict, svc: dict | None) -> str | None:
     return f"http://{host}:{svc['port']}{svc.get('path') or ''}"
 
 
-def cluster_from_status(st: dict) -> dict:
-    """The model and daemon tables, from one daemon's /status.
+def head_status(st: dict) -> dict | None:
+    """The mesh head's /status, or None when this daemon is the head.
+
+    Every daemon knows every node, but the cluster's groups are held by the
+    head: another daemon lists only the groups registered with it. The head
+    is named by node id, and the peer table gives its address.
+    """
+    head = st.get("head_node_id")
+    if not head or head == st.get("node_id"):
+        return None
+    peer = (st.get("peers") or {}).get(head) or {}
+    if not peer.get("node_ip"):
+        raise LookupError(f"the head {head} is not among this daemon's peers")
+    port = peer.get("http_port") or MENTAT_HTTP.rsplit(":", 1)[1]
+    return _get_json(f"http://{peer['node_ip']}:{port}/status")
+
+
+def cluster_from_status(st: dict, head: dict | None = None) -> dict:
+    """The model and daemon tables, from this daemon's /status and the head's.
 
     Each group is drawn from one of its agents: a live one that serves the
     OpenAI API if there is one. A model spread over several nodes registers
-    that API from its head alone. Every daemon knows every node, so the
-    daemon list is this daemon and its peers.
+    that API from its head alone. The groups come from the mesh head, with
+    any the head has not heard of yet from this daemon. The daemon list is
+    this daemon and its peers.
     """
     groups = {}
-    for name, g in (st.get("groups") or {}).items():
+    merged = {**(st.get("groups") or {}), **((head or {}).get("groups") or {})}
+    for name, g in merged.items():
         agents = [a for a in (g.get("agents") or {}).values() if a.get("services")]
         if not agents:
             continue
@@ -591,8 +610,12 @@ def watch_cluster():
     """
     while True:
         try:
-            mentat, err = cluster_from_status(
-                _get_json(f"http://{MENTAT_HTTP}/status")), None
+            st = _get_json(f"http://{MENTAT_HTTP}/status")
+            try:
+                head, err = head_status(st), None
+            except Exception as e:
+                head, err = None, f"mesh head: {type(e).__name__}: {e}"
+            mentat = cluster_from_status(st, head)
         except Exception as e:
             mentat, err = None, f"{type(e).__name__}: {e}"
         nodes = read_nodes((mentat or {}).get("daemons") or {})
