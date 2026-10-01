@@ -1,0 +1,69 @@
+#!/bin/sh
+# Bring the DGX OS install's login users into spark-os, before sshd starts.
+#
+# The image itself only knows admin (uid 1000), the fallback login. Every box has its own users on
+# its DGX OS root, which the initramfs leaves at /run/sparkos/host:
+#   - regular users (uid 1000-59999) and their personal groups are copied in, replacing the image's
+#     entry of the same name, so passwords and shells set on DGX OS apply here too
+#   - their memberships in groups the image also has (sudo, docker, adm, ...) are merged by group name
+#   - the image's admin is dropped if a DGX OS user holds its uid under another name
+#   - /etc/sudoers.d files are copied, each only if visudo accepts it
+# Nothing here is baked into the image, so no password hash ever sits in an image file.
+set -eu
+# SPARKOS_HOST_ETC and SPARKOS_ETC point it at copies, for testing.
+H=${SPARKOS_HOST_ETC:-/run/sparkos/host/etc}
+E=${SPARKOS_ETC:-/etc}
+[ -f "$H/passwd" ] || exit 0
+umask 077
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+awk -F: '$3 >= 1000 && $3 < 60000 {print $1}' "$H/passwd" > "$tmp/users"
+awk -F: '$3 >= 1000 && $3 < 60000 {print $1}' "$H/group" > "$tmp/groups"
+# Image-only users whose uid a DGX OS user already holds (the fallback admin on a fleet whose uid
+# 1000 has another name), with their personal groups.
+awk -F: 'NR == FNR { if ($3 >= 1000 && $3 < 60000) hostuid[$3] = $1; next }
+	 ($3 in hostuid) && hostuid[$3] != $1 {print $1}' "$H/passwd" "$E/passwd" > "$tmp/drop"
+cat "$tmp/users" "$tmp/drop" > "$tmp/users_out"
+cat "$tmp/groups" "$tmp/drop" > "$tmp/groups_out"
+
+# replace FILE HOSTFILE NAMES: drop FILE's entries named in NAMES, then append HOSTFILE's entries for
+# the regular names, keeping FILE's mode and owner.
+replace() {
+	[ -f "$1" ] && [ -f "$2" ] || return 0
+	awk -F: 'NR == FNR {skip[$1] = 1; next} !($1 in skip)' "$3" "$1" > "$tmp/new"
+	awk -F: 'NR == FNR {keep[$1] = 1; next} ($1 in keep)' "$4" "$2" >> "$tmp/new"
+	cat "$tmp/new" > "$1"
+}
+replace "$E/passwd" "$H/passwd" "$tmp/users_out" "$tmp/users"
+replace "$E/shadow" "$H/shadow" "$tmp/users_out" "$tmp/users"
+replace "$E/group" "$H/group" "$tmp/groups_out" "$tmp/groups"
+replace "$E/gshadow" "$H/gshadow" "$tmp/groups_out" "$tmp/groups"
+
+# Merge the regular users' supplementary memberships into the image's groups of the same name, and
+# take dropped users out of every member list.
+awk -F: -v OFS=: '
+	FILENAME == ARGV[1] { users[$1] = 1; next }
+	FILENAME == ARGV[2] { drop[$1] = 1; next }
+	FILENAME == ARGV[3] { n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] in users) add[$1] = add[$1] "," m[i]; next }
+	{
+		n = split($4 add[$1], m, ","); $4 = ""
+		for (i = 1; i <= n; i++)
+			if (m[i] != "" && !(m[i] in drop) && !(m[i] in seen)) { $4 = ($4 == "" ? m[i] : $4 "," m[i]); seen[m[i]] = 1 }
+		delete seen
+		print
+	}' "$tmp/users" "$tmp/drop" "$H/group" "$E/group" > "$tmp/group"
+cat "$tmp/group" > "$E/group"
+
+# The fallback admin's sudo rule goes with it.
+grep -qx admin "$tmp/drop" && rm -f "$E/sudoers.d/90-admin-nopasswd"
+for f in "$H"/sudoers.d/*; do
+	[ -f "$f" ] || continue
+	case ${f##*/} in README|*~|*.*) continue ;; esac  # sudo skips these names too
+	if visudo -cqf "$f"; then
+		install -m 0440 -o root -g root "$f" "$E/sudoers.d/${f##*/}"
+	else
+		echo "sparkos-users: skipping ${f##*/}, which visudo rejects" >&2
+	fi
+done
+echo "sparkos-users: $(wc -l < "$tmp/users") users from DGX OS$(grep -qx admin "$tmp/drop" && echo ', fallback admin dropped' || true)"

@@ -4,8 +4,9 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
-# admin is uid/gid 1000 on every box and owns the persistent /home, so the numbers must match. No
-# password: ssh keys come from the persistent /home/admin/.ssh.
+# admin (uid/gid 1000) is only the fallback login: at boot sparkos-users brings in the DGX OS
+# install's own users, and drops admin if a DGX OS user already holds uid 1000. No password: ssh keys
+# come from the persistent /home/admin/.ssh.
 groupadd -g 1000 admin
 useradd -u 1000 -g 1000 -G adm,sudo,docker,users -s /bin/bash -M -d /home/admin admin
 passwd -l admin
@@ -20,9 +21,10 @@ useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nolo
 # /run/sparkos/host. /var/log too, so the journal survives a reboot instead of filling the RAM
 # overlay. spark-watchdog's reset log must outlive the reset it records, or its "two resets in an
 # hour means stop" guard never fires. /var/lib/nfs holds the NFS server's export and lock-recovery
-# state. kindling-setup install creates any source directory DGX OS lacks. A site layer adds its
-# own binds the same way.
-for d in home var/log var/lib/docker var/lib/containerd var/lib/spark-watchdog var/lib/nfs; do
+# state. /srv and /var/tmp are where model recipes keep weights and compose directories
+# (/srv/models/...). kindling-setup install creates any source directory DGX OS lacks. A site layer
+# adds its own binds the same way.
+for d in home srv var/tmp var/log var/lib/docker var/lib/containerd var/lib/spark-watchdog var/lib/nfs; do
   mkdir -p "/$d"
   echo "/run/sparkos/host/$d /$d none bind,nofail 0 0" >> /etc/fstab
 done
@@ -34,7 +36,7 @@ echo "init_on_alloc=0 iommu.passthrough=0 earlycon=uart,mmio32,0x16A00000 consol
 
 systemctl set-default multi-user.target
 systemctl enable ssh NetworkManager docker containerd nvidia-persistenced systemd-resolved \
-  systemd-timesyncd sparkos-swap sparkos-boot-ok spark-watchdog spark-dmesg-snapshot.timer sparkos-trial-revert.timer \
+  systemd-timesyncd sparkos-users sparkos-swap sparkos-boot-ok spark-watchdog spark-dmesg-snapshot.timer sparkos-trial-revert.timer \
   mentatd spark-agent dispramd spark-console
 # tty1 belongs to spark-console; the other consoles keep their gettys.
 systemctl mask getty@tty1.service autovt@tty1.service

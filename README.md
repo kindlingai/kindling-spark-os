@@ -8,8 +8,11 @@ by making use of GPU RAM that normally goes unused.
 
 The image is an erofs file on the box's own root disk. At boot the initramfs mounts it under a RAM
 overlay, copies the box's identity in (hostname, machine-id, ssh host keys, network config,
-`/etc/spark`), and binds `/home`, `/var/log`, `/var/lib/docker`, `/var/lib/containerd`,
-`/var/lib/spark-watchdog` and `/var/lib/nfs` from the root disk. Every boot starts from the same
+`/etc/spark`), and binds `/home`, `/srv`, `/var/tmp`, `/var/log`, `/var/lib/docker`,
+`/var/lib/containerd`, `/var/lib/spark-watchdog` and `/var/lib/nfs` from the root disk. At boot,
+`sparkos-users` copies in the DGX OS install's login users (uid 1000 and up), their group
+memberships and its `/etc/sudoers.d`, so whoever logs in to DGX OS logs in here too. The image's own
+`admin` is only a fallback. Every boot starts from the same
 image. DGX OS stays installed as the rescue system and owns GRUB.
 
 The image carries:
@@ -94,6 +97,14 @@ boots with `panic=30`, and `sparkos-boot-ok.service` clears the flag once the im
 multi-user. If a boot dies first, from a panic, a missing file, or a hang after spark-watchdog
 starts, GRUB's next boot goes to DGX OS (entry 0) with no one at the console. A hard hang earlier
 in boot still needs a power cycle, after which the same fallback applies.
+
+### Rollback
+
+`sparkos-rollback` makes DGX OS the default boot again and reboots, in one command.
+`sparkos-rollback VERSION` goes back to an earlier installed image instead: as the default if it was
+promoted, or as a one-shot trial if it was not. `--no-reboot` sets GRUB without rebooting. Both
+cancel any queued one-shot boot and clear GRUB's recordfail flag. `install` puts the same command in
+the DGX OS root, so it works from either OS.
 
 `enter-dgx-os [COMMAND]` runs a shell or command in the DGX OS install from spark-os, in a private
 mount namespace. Use it for anything the image leaves out: apt, update-grub, grub-reboot.

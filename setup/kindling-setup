@@ -132,7 +132,7 @@ install_image() {
   [ -e "$d" ] && die "$d already exists; pick another --version"
   install -d "$host/images" "$d"
   # Sources for the image's bind mounts (setup/customize.sh) that DGX OS may not have made.
-  install -d "$host/var/lib/spark-watchdog" "$host/var/lib/nfs"
+  install -d "$host/var/lib/spark-watchdog" "$host/var/lib/nfs" "$host/srv"
   install -m644 "$out/spark-os.erofs" "$host/images/spark-os-$version.erofs"
   install -m644 "$out/vmlinuz" "$d/vmlinuz"
   install -m644 "$out/initrd.img" "$d/initrd.img"
@@ -140,6 +140,7 @@ install_image() {
 # One GRUB entry, read by /etc/grub.d/42_sparkos. Paths are on the root filesystem.
 NAME=$version
 STACK=$STACK
+KINDLING=$(cat "$K/VERSION")
 KERNEL=/boot/sparkos/$version/vmlinuz
 INITRD=/boot/sparkos/$version/initrd.img
 IMAGE=/images/spark-os-$version.erofs
@@ -148,6 +149,8 @@ CMDLINE="$(cat "$out/cmdline")"
 TRIAL=1
 EOF
   install -m755 "$K/setup/42_sparkos" "$host/etc/grub.d/42_sparkos"
+  # The same one-command rollback on DGX OS as on spark-os.
+  install -m755 "$K/overlay/usr/local/sbin/sparkos-rollback" "$host/usr/local/sbin/sparkos-rollback"
   # GRUB_DEFAULT=saved lets grub-reboot choose a single boot while DGX OS (entry 0) stays the default.
   install -d "$host/etc/default/grub.d"
   [ -f "$host/etc/default/grub.d/99-sparkos.cfg" ] || echo 'GRUB_DEFAULT=saved' > "$host/etc/default/grub.d/99-sparkos.cfg"
@@ -166,7 +169,8 @@ list() {
   local conf
   for conf in "$host"/boot/sparkos/*/entry.conf; do
     [ -f "$conf" ] || continue
-    ( . "$conf"; printf '%-28s stack %-24s trial=%s %s\n' "$NAME" "${STACK:-?}" "$TRIAL" \
+    ( . "$conf"; printf '%-28s kindling %-5s stack %-24s trial=%s %s\n' "$NAME" "${KINDLING:-?}" \
+        "${STACK:-?}" "$TRIAL" \
         "$(du -h "$host$IMAGE" 2>/dev/null | cut -f1)" )
   done
   in_host grub-editenv list
@@ -193,7 +197,7 @@ case $cmd in
   build) parse "$@"; build; echo "built $out" ;;
   remove) remove "$@" ;;
   list) list ;;
-  stack) cat "$K/stack/stack.env" ;;
+  stack) echo "KINDLING=$(cat "$K/VERSION")"; cat "$K/stack/stack.env" ;;
   -h|--help|help) sed -n '2,/^set -euo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//' ;;
   *) die "unknown command $cmd (try --help)" ;;
 esac

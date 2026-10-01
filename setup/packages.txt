@@ -90,3 +90,5 @@ nfs-kernel-server
 htop
 # the spark agent's lsusb
 usbutils
+# recipes read their checkout's commit on the box
+git

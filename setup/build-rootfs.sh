@@ -99,6 +99,7 @@ mmdebstrap --mode=root --variant=minbase --architectures=arm64 --include="$pkgs"
   "deb [signed-by=/usr/share/keyrings/cuda_debian_prod.gpg] $cuda /"
 
 echo "$VERSION" > "$work/rootfs/etc/spark-os-version"
+cp "$K/VERSION" "$work/rootfs/etc/kindling/version"
 # On the 64k kernel a PMD huge page is 512 MiB. When THP is enabled, khugepaged raises
 # vm.min_free_kbytes to hold a few free pageblocks of that size per zone, which the kernel caps at
 # 5% of RAM: 6.2 GiB on a 128 GiB box, where the 4k kernel keeps 44 MB. That costs more than the

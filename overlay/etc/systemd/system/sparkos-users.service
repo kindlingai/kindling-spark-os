@@ -1,0 +1,16 @@
+# Copy the DGX OS install's login users and sudo rules in before anything logs in or starts as
+# them. See sparkos-users.
+[Unit]
+Description=Login users from the DGX OS install
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target ssh.service systemd-logind.service systemd-user-sessions.service
+ConditionPathIsMountPoint=/run/sparkos/host
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/sparkos-users
+
+[Install]
+WantedBy=sysinit.target

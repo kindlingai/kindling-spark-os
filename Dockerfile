@@ -56,6 +56,7 @@ RUN echo "py-spy==$PY_SPY_VERSION --hash=sha256:$PY_SPY_SHA256" > /tmp/py-spy.tx
     && /out/agent-lib/bin/py-spy --version
 
 FROM ubuntu:24.04
+LABEL org.opencontainers.image.source=https://github.com/kindlingai/kindling-spark-os
 RUN apt-get update && apt-get install -y --no-install-recommends \
       mmdebstrap erofs-utils dpkg-dev python3 python3-yaml ca-certificates gnupg zstd util-linux \
     && rm -rf /var/lib/apt/lists/*
@@ -69,6 +70,6 @@ COPY dispram/python /opt/kindling/dispram/python
 COPY dispram/vllm /opt/kindling/dispram/vllm
 COPY overlay /opt/kindling/overlay
 COPY setup /opt/kindling/setup
-COPY stacks.yaml LICENSE README.md /opt/kindling/
+COPY VERSION stacks.yaml LICENSE README.md /opt/kindling/
 ENTRYPOINT ["/opt/kindling/setup/kindling-setup"]
 CMD ["--help"]

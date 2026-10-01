@@ -23,7 +23,8 @@ render() {
 	local cols st now
 	cols=$(tput cols 2>/dev/null || echo 80)
 	now=$(date '+%Y-%m-%d %H:%M:%S %Z')
-	printf '%skindling%s spark-os %s  %s  %s\n' "$BRAND" "$RESET" \
+	printf '%skindling%s spark-os %s (%s)  %s  %s\n' "$BRAND" "$RESET" \
+		"$(cat /etc/kindling/version 2>/dev/null || echo '?')" \
 		"$(cat /etc/spark-os-version 2>/dev/null || echo '?')" "$(hostname)" "$now"
 	printf '%*s\n' "$cols" '' | tr ' ' -
 	printf 'up %s, load %s\n' "$(uptime -p | sed 's/^up //')" "$(cut -d' ' -f1-3 /proc/loadavg)"
