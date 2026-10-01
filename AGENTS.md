@@ -87,6 +87,36 @@ every box. A name already on the box gets `-2`, `-3`. The GRUB entry id is `spar
 - `enter-dgx-os [CMD]` runs a command in the DGX OS root, in a private mount namespace. Use it for
   apt, `update-grub`, `grub-reboot`, `grub-editenv`. spark-os itself has no `grub-reboot`.
 
+## Diagnosing a running box
+
+Every box runs the spark agent: a status page on `http://<box>:8090/` and MCP tools at
+`http://<box>:8090/mcp` (JSON-RPC over HTTP POST). The tools only read. Reach for them before ssh:
+they need no login and cannot change the box. The agent answers loopback and the box's own subnets.
+
+| Tool | Returns |
+|---|---|
+| `models` | every group, model and node in the mentat cluster, with each engine's token load |
+| `gpu` | `nvidia-smi`. `args`: `query` for load, clocks, temperature and power, `apps` for per-process memory, `topo`, `clocks` |
+| `memory_accounting` | host memory by owner, reconciled against MemTotal, including the GPU's share |
+| `meminfo`, `processes` | raw `/proc/meminfo`, and `ps` sorted by RSS |
+| `engine_stacks` | py-spy stacks of the engine processes over several rounds (`rounds`, `gap_s`) |
+| `docker_ps`, `systemd_units` | containers, and running services |
+| `list_logs`, `read_log` | `/var/log/spark`: dmesg, docker and container logs. `read_log` takes `file`, `lines` and `grep` |
+| `network`, `rdma_counters`, `pci`, `usb` | `ip addr`/`ip link`/`rdma link`, one port's RoCE counters (`device`), `lspci -nnk`, `lsusb -t` |
+
+For example, the GPU's load on one box:
+
+    curl -s -X POST -H 'content-type: application/json' http://<box>:8090/mcp \
+      -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gpu","arguments":{"args":"query"}}}'
+
+The mentat router's `/mcp` merges every box's agent with every model container's own status server
+(engine metrics, serve arguments, caches, versions). A tool that several groups offer takes a
+`__group` argument: `agent-<hostname>` for a box, or the model's group name. Routers older than
+mentat 0.18.0 drop a box's agent group an hour after it registers, so on those use the box's own
+`:8090/mcp`.
+
+`docker_ps` and the logs come from files a timer writes every minute, so they can be a minute old.
+
 ## Boot safety
 
 This is the part to be most careful with. A box may be in another building, with nobody at the
