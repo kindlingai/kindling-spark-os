@@ -3,6 +3,9 @@
 A minimal, read-only OS image for NVIDIA GB10 boxes (DGX Spark, ASUS Ascent GX10), installed beside
 the box's DGX OS and booted from GRUB.
 
+`kindling-spark-os` gets you an extra 4GB to run models: first, by using a 64kB kernel, and second,
+by making use of GPU RAM that normally goes unused.
+
 The image is an erofs file on the box's own root disk. At boot the initramfs mounts it under a RAM
 overlay, copies the box's identity in (hostname, machine-id, ssh host keys, network config,
 `/etc/spark`), and binds `/home`, `/var/log`, `/var/lib/docker` and `/var/lib/containerd` from
@@ -58,8 +61,8 @@ state, `stack` the pair this setup image carries.
 ### Trial and promote
 
 A new image boots in trial mode: `sparkos.trial panic=10` on the cmdline. A failed mount panics and
-reboots, and an unconfirmed boot reboots after 10 minutes. GRUB's one-shot entry is spent by then,
-so both land back in DGX OS. A boot that came up without working ssh undoes itself.
+reboots, and an unconfirmed boot reboots after 10 minutes. GRUB's one-shot entry is gone by then,
+so both land back in DGX OS. If you don't get SSH up and running, it reverts back.
 
 Once the image is good, run `sparkos-promote` on it. That confirms the boot, drops the trial flag,
 and makes the image GRUB's default. DGX OS stays in the menu.
