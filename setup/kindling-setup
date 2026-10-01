@@ -80,6 +80,17 @@ parse() {
   [[ $version =~ ^[A-Za-z0-9._-]+$ ]] || die "version may hold only letters, digits, '.', '_' and '-'"
   if [ -z "$site" ] && [ -d "$host/etc/kindling-spark-os/site" ]; then site=$host/etc/kindling-spark-os/site; fi
   out=${out:-$host/var/tmp/kindling-spark-os/$version}
+  # The build writes into $out and cleans it up afterwards, so it must not hold anything else.
+  if [ -e "$out" ] && [ -n "$(ls -A "$out" 2>/dev/null)" ]; then
+    die "$out exists and is not empty; --out needs a new or empty directory"
+  fi
+}
+
+# Removes what a build put in $out, and $out itself only if that leaves it empty.
+clean_out() {
+  rm -rf "$out/work"
+  rm -f "$out/spark-os.erofs" "$out/vmlinuz" "$out/initrd.img" "$out/cmdline"
+  rmdir "$out" 2>/dev/null || true
 }
 
 build() {
@@ -87,7 +98,7 @@ build() {
   echo "building spark-os $version: kernel $KERNEL_ABI-$flavour, driver $DRIVER${site:+, site layer $site}"
   # A failed build leaves a multi-GB rootfs behind, often on a disk that just ran out of space.
   OUT=$out VERSION=$version FLAVOUR=$flavour SITE=$site HOST=$host "$K/setup/build-rootfs.sh" ||
-    { rm -rf "$out"; die "build failed; removed $out"; }
+    { clean_out; die "build failed"; }
 }
 
 # A swap header records its page size, so a 64k image cannot use DGX OS's /swap.img. This makes a
@@ -140,7 +151,7 @@ EOF
   [ -f "$host/etc/default/grub.d/99-sparkos.cfg" ] || echo 'GRUB_DEFAULT=saved' > "$host/etc/default/grub.d/99-sparkos.cfg"
   in_host grub-editenv list | grep -q '^saved_entry=' || in_host grub-editenv - set saved_entry=0
   update_grub
-  rm -rf "$out"
+  clean_out
   parallel_swap
   echo "installed spark-os $version"
   if [ "$trial" = 1 ]; then
@@ -161,6 +172,7 @@ list() {
 
 remove() {
   local version=${1:?usage: remove VERSION} d conf
+  [[ $version =~ ^[A-Za-z0-9._-]+$ ]] && [[ $version != *..* ]] || die "not a version name: $version"
   d=$host/boot/sparkos/$version
   conf=$d/entry.conf
   [ -f "$conf" ] || die "no installed image $version"
