@@ -133,7 +133,22 @@ parse() {
     [ -f "$host$src" ] || die "--sources $src: no such file on the DGX OS root"
   done
   if [ -z "$site" ] && [ -d "$host/etc/kindling-spark-os/site" ]; then site=$host/etc/kindling-spark-os/site; fi
-  out=${out:-$host/var/tmp/kindling-spark-os/$version}
+  if [ -z "$out" ]; then
+    # One build at a time, under a lock this process holds until it exits. With the lock held,
+    # anything left in the work area is from a run cut short, by a reboot or a killed container,
+    # and it would block the next run. Its mounts died with that container's mount namespace;
+    # --one-file-system keeps rm out of any that did not.
+    local work=$host/var/tmp/kindling-spark-os stale
+    install -d "$work"
+    exec 9>"$work/.lock"
+    flock -n 9 || die "another kindling-setup build is running on this box"
+    for stale in "$work"/*/; do
+      [ -d "$stale" ] || continue
+      echo "removing ${stale#"$host"}, $(du -sh "$stale" | cut -f1) left by an interrupted build"
+      rm -rf --one-file-system "$stale"
+    done
+    out=$work/$version
+  fi
   # The build writes into $out and cleans it up afterwards, so it must not hold anything else.
   if [ -e "$out" ] && [ -n "$(ls -A "$out" 2>/dev/null)" ]; then
     die "$out exists and is not empty; --out needs a new or empty directory"
