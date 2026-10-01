@@ -44,21 +44,52 @@ def available():
     """
     if os.environ.get("DISPRAM_DISABLE") == "1":
         return False
-    try:
-        _sock()
-    except OSError:
-        return False
-    return True
+    # Twice: a failure drops a connection to a daemon that has since restarted, and the second try
+    # makes a new one.
+    for _ in range(2):
+        try:
+            info()
+            return True
+        except (OSError, ValueError):
+            pass
+    return False
+
+
+def _drop_conn():
+    """Forget a connection whose daemon went away, so the next call reconnects or reports it gone.
+
+    A claim made over that connection is gone too: dispramd frees a client's slices when its socket
+    closes."""
+    global _conn, _claim
+    if _conn is not None:
+        _conn.close()
+    _conn = None
+    if _claim is not None:
+        os.close(_claim[0])
+        _claim = None
 
 
 def _request(**req):
     s = _sock()
-    s.send(json.dumps({"key": KEY, **req}).encode())
+    try:
+        s.send(json.dumps({"key": KEY, **req}).encode())
+    except OSError:
+        _drop_conn()
+        raise
     return s
 
 
 def info():
-    return json.loads(_request(op="info").recv(4096))
+    s = _request(op="info")
+    try:
+        msg = s.recv(4096)
+    except OSError:
+        _drop_conn()
+        raise
+    if not msg:  # the daemon closed the connection
+        _drop_conn()
+        raise ConnectionResetError("dispramd closed the connection")
+    return json.loads(msg)
 
 
 def _lend(size):
