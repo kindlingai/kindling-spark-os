@@ -1,10 +1,14 @@
 # kindling-spark-os
 
+*Kindling Spark OS is in beta. Visit the discord for support https://discord.gg/M7XTrRJW3*
+
 A minimal, read-only OS image for NVIDIA GB10 boxes (DGX Spark, ASUS Ascent GX10), installed beside
 the box's DGX OS and booted from GRUB.
 
 `kindling-spark-os` gets you an extra 4GB to run models: first, by using a 64kB kernel, and second,
 by making use of GPU RAM that normally goes unused.
+
+![The kindling spark-os status screen on tty1: image version, addresses, GPU, memory, containers and the mentat cluster](docs/status-screen.png)
 
 The image is an erofs file on the box's own root disk. At boot the initramfs mounts it under a RAM
 overlay, copies the box's identity in (hostname, machine-id, ssh host keys, network config,
