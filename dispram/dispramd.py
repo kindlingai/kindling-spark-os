@@ -47,15 +47,31 @@ class Carveout:
         self.base, self.size = base.value, size.value
         self.free = [(self.base, self.base + self.size)]  # sorted, disjoint [start, end)
 
+    def inside(self, start, size):
+        """Whether [start, start + size) is a non-empty range inside DISPLAY_FRM."""
+        return size > 0 and self.base <= start and start + size <= self.base + self.size
+
     def alloc(self, size):
+        """A (start, size) slice of at least size bytes, rounded up to GRAN, or None.
+
+        Raises ValueError for a size that is not a positive int no larger than the carveout. An
+        unchecked negative size moved the free list below DISPLAY_FRM, so later slices could cover
+        ordinary RAM.
+        """
+        if type(size) is not int or not 0 < size <= self.size:
+            raise ValueError(f"size must be an integer from 1 to {self.size}")
         size = -(-size // GRAN) * GRAN
         for i, (s, e) in enumerate(self.free):
             if e - s >= size:
                 self.free[i:i + 1] = [(s + size, e)] if e - s > size else []
+                if not self.inside(s, size):  # cannot happen while free stays inside the carveout
+                    raise RuntimeError(f"allocator produced 0x{s:x} + {size}, outside DISPLAY_FRM")
                 return s, size
         return None
 
     def release(self, start, size):
+        if not self.inside(start, size):
+            raise RuntimeError(f"release of 0x{start:x} + {size}, outside DISPLAY_FRM")
         self.free.append((start, start + size))
         self.free.sort()
         merged = []
@@ -107,6 +123,47 @@ def main():
         sel.unregister(conn)
         conn.close()
 
+    def reply(conn, obj, fds=()):
+        socket.send_fds(conn, [json.dumps(obj).encode()], list(fds))
+
+    def handle(conn, msg):
+        """Answer one request. Returns False when the connection should close."""
+        try:
+            req = json.loads(msg)
+        except ValueError:
+            req = None
+        if not isinstance(req, dict) or req.get("key") != KEY:
+            reply(conn, {"ok": False, "error": "missing or unknown key"})
+            return False
+        op = req.get("op")
+        if op == "info":
+            reply(conn, co.stats())
+        elif op == "alloc":
+            try:
+                got = co.alloc(req.get("size"))
+            except ValueError as e:
+                reply(conn, {"ok": False, "error": str(e)})
+                return True
+            if got is None:
+                reply(conn, {"ok": False, "error": "not enough free carveout", **co.stats()})
+                return True
+            start, size = got
+            handle = ctypes.c_uint()
+            fd = co.rm.rm_export_range_h(ctypes.c_ulonglong(start), ctypes.c_ulonglong(size), ctypes.byref(handle))
+            if fd < 0:
+                co.release(start, size)
+                reply(conn, {"ok": False, "error": "RM export failed"})
+                return True
+            owned[conn].append((start, size, handle.value))
+            try:
+                reply(conn, {"ok": True, "base": start, "size": size}, [fd])
+            finally:
+                os.close(fd)
+            log(f"lent 0x{start:x} + {size >> 20} MiB")
+        else:
+            reply(conn, {"ok": False, "error": "unknown op"})
+        return True
+
     while True:
         for key, _ in sel.select():
             if key.fileobj is srv:
@@ -115,41 +172,15 @@ def main():
                 sel.register(conn, selectors.EVENT_READ)
                 continue
             conn = key.fileobj
+            # One client's error closes that client and frees its slices. It must not take the
+            # daemon down: a restarted dispramd forgets every live slice and lends them again.
             try:
                 msg = conn.recv(4096)
-            except OSError:
-                msg = b""
-            if not msg:
-                close(conn)
-                continue
-            try:
-                req = json.loads(msg)
-            except ValueError:
-                req = {}
-            if not isinstance(req, dict) or req.get("key") != KEY:
-                conn.send(json.dumps({"ok": False, "error": "missing or unknown key"}).encode())
-                close(conn)
-                continue
-            if req.get("op") == "info":
-                conn.send(json.dumps(co.stats()).encode())
-            elif req.get("op") == "alloc":
-                got = co.alloc(int(req["size"]))
-                if got is None:
-                    conn.send(json.dumps({"ok": False, "error": "not enough free carveout", **co.stats()}).encode())
+                if msg and handle(conn, msg):
                     continue
-                start, size = got
-                handle = ctypes.c_uint()
-                fd = co.rm.rm_export_range_h(ctypes.c_ulonglong(start), ctypes.c_ulonglong(size), ctypes.byref(handle))
-                if fd < 0:
-                    co.release(start, size)
-                    conn.send(json.dumps({"ok": False, "error": "RM export failed"}).encode())
-                    continue
-                owned[conn].append((start, size, handle.value))
-                socket.send_fds(conn, [json.dumps({"ok": True, "base": start, "size": size}).encode()], [fd])
-                os.close(fd)
-                log(f"lent 0x{start:x} + {size >> 20} MiB")
-            else:
-                conn.send(json.dumps({"ok": False, "error": "unknown op"}).encode())
+            except Exception as e:
+                log(f"closing a client after {type(e).__name__}: {e}")
+            close(conn)
 
 
 if __name__ == "__main__":
