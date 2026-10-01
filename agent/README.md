@@ -10,6 +10,11 @@ through the mentat router with `__group=agent-<hostname>`.
 - `spark-memory.py`: accounts for every byte of host memory, including the GPU's share, which
   process RSS does not show. The agent and the snapshot timer both run it.
 
+It needs no settings. The page and the `models` tool read every node and model from the box's own
+mentatd, and the agent answers loopback and the box's own subnets, leaving out container bridges.
+The optional `/etc/spark/agent.env` can name the router (`MENTAT_ROUTER_URL`) and replace the
+subnets (`ALLOWED_SOURCES`).
+
 The image installs them at `/opt/spark-agent/` and `/usr/local/bin/`, and runs the agent from
 `spark-agent.service`. Beyond the standard library it needs py-spy and mentat's `ray.register`
 shim, which the Dockerfile pins.

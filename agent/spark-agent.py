@@ -18,6 +18,7 @@ and it runs without that. Prototype on a spare port with:
     python3 spark-agent.py --port 8090
 """
 import argparse
+import ipaddress
 import json
 import os
 import shutil
@@ -54,11 +55,16 @@ AGENT_PORT = int(os.environ.get("AGENT_PORT", "8090"))
 LISTEN_PORT = AGENT_PORT
 MAX_BYTES = 64 * 1024
 
-# mentat owns the model list: containers register with mentatd, and the
-# mentat-serve router decides what is routable. The agent reads the router's
-# table rather than keeping a registry of its own, so the two cannot disagree.
+# mentat owns the model list: containers register with mentatd, and the mesh
+# copies every registration to every daemon. The agent reads the local
+# daemon's /status rather than keeping a registry of its own, so the two
+# cannot disagree, and it needs no address to find it.
+MENTAT_HTTP = os.environ.get("MENTAT_HTTP", "127.0.0.1:6380")
+# Optional: the mentat-serve router, linked from the page and always let in to
+# the MCP port, because it forwards every merged tool call. A router on one of
+# this node's subnets is let in without it.
 MENTAT_ROUTER_URL = os.environ.get("MENTAT_ROUTER_URL", "")
-# How often the router and the engines are read. Token rates are differenced
+# How often mentatd and the engines are read. Token rates are differenced
 # across this interval, so it also sets how twitchy the numbers look.
 LOAD_INTERVAL_S = float(os.environ.get("LOAD_INTERVAL_S", "5"))
 
@@ -309,21 +315,24 @@ def t_memory_accounting(**_):
 
 
 def t_models(**_):
-    """The router's view of every model, with the load this agent scraped."""
-    cluster = router_snapshot()
+    """mentat's view of every model, with the load this agent scraped."""
+    cluster = cluster_snapshot()
     with _load_lock:
         loads = dict(_load)
-    return json.dumps({"router": MENTAT_ROUTER_URL, **cluster,
+    return json.dumps({"router": MENTAT_ROUTER_URL or None, **cluster,
                        "load": loads}, indent=2)
 
 
 
 # --- load sampling ----------------------------------------------------------
-# The agent scrapes each engine the router lists rather than the engine
+# The agent scrapes each engine mentat lists rather than the engine
 # reporting its load. That keeps every model image out of this: a container
 # announces where it serves to mentat, and what it is doing is derived here.
 
 _load: dict[str, dict] = {}
+# Why the last scrape of an engine failed, by group. An engine that answers
+# /metrics is serving, so this is also what the page calls healthy.
+_load_err: dict[str, str] = {}
 _load_lock = threading.Lock()
 _load_prev: dict[str, tuple[float, float, float]] = {}
 
@@ -458,7 +467,7 @@ def read_driver_errors() -> dict:
 # node.
 MENTAT_GROUP = os.environ.get("MENTAT_GROUP", f"agent-{HOSTNAME}")
 MENTAT_DAEMON = os.environ.get("MENTAT_DAEMON", "127.0.0.1:6379")
-# Short, because one loop reads the router, every peer agent and every engine
+# Short, because one loop reads mentatd, every peer agent and every engine
 # in turn, and a dead node should cost a round seconds, not minutes.
 FETCH_TIMEOUT_S = 2.0
 
@@ -494,22 +503,70 @@ def _get_json(url: str) -> dict:
         return json.loads(r.read().decode())
 
 
-# The last complete read of the cluster: the router's table and what each
-# node's agent reported about itself.
-_cluster: dict = {"router": None, "router_error": "not read yet", "nodes": {}}
+# The last complete read of the cluster: mentat's table and what each node's
+# agent reported about itself.
+_cluster: dict = {"mentat": None, "mentat_error": "not read yet", "nodes": {}}
 _cluster_lock = threading.Lock()
 
 
-def router_snapshot() -> dict:
+def cluster_snapshot() -> dict:
     with _cluster_lock:
         return dict(_cluster)
+
+
+def service_url(agent: dict, svc: dict | None) -> str | None:
+    """A registered service's base URL. An empty host is the agent's node."""
+    if not svc or not svc.get("port"):
+        return None
+    host = svc.get("host") or agent.get("node_ip") or ""
+    if not host:
+        return None
+    if ":" in host:
+        host = f"[{host}]"
+    return f"http://{host}:{svc['port']}{svc.get('path') or ''}"
+
+
+def cluster_from_status(st: dict) -> dict:
+    """The model and daemon tables, from one daemon's /status.
+
+    Each group is drawn from one of its agents: a live one that serves the
+    OpenAI API if there is one. A model spread over several nodes registers
+    that API from its head alone. Every daemon knows every node, so the
+    daemon list is this daemon and its peers.
+    """
+    groups = {}
+    for name, g in (st.get("groups") or {}).items():
+        agents = [a for a in (g.get("agents") or {}).values() if a.get("services")]
+        if not agents:
+            continue
+        a = max(agents, key=lambda a: (bool(a.get("alive")) and not a.get("degraded"),
+                                       "openai" in a["services"]))
+        groups[name] = {
+            "openai": service_url(a, a["services"].get("openai")),
+            "mcp": service_url(a, a["services"].get("mcp")),
+            "why_not": (None if a.get("alive") and not a.get("degraded") else
+                        "degraded" if a.get("alive") else "agent gone"),
+        }
+    daemons = {}
+    port = MENTAT_HTTP.rsplit(":", 1)[1]
+    for n in [dict(st, alive=True), *(st.get("peers") or {}).values()]:
+        ip = n.get("node_ip")
+        if not ip:
+            continue
+        p = n.get("http_port") or port
+        daemons[f"{ip}:{p}"] = {
+            "alternates": [f"{a}:{p}" for a in n.get("addrs") or [] if a != ip],
+            "connected": bool(n.get("alive")),
+            "error": None if n.get("alive") else "not heard from",
+        }
+    return {"groups": groups, "daemons": daemons}
 
 
 def read_nodes(daemons: dict) -> dict[str, dict]:
     """daemon address -> that node's agent status, or why there is none.
 
-    The router's watch set is the node list. mentat knows nothing of the
-    interlink or the driver, so each node's agent is asked for its own.
+    mentat knows nothing of the interlink or the driver, so each node's agent
+    is asked for its own.
     """
     out = {}
     for addr, d in sorted(daemons.items()):
@@ -527,28 +584,29 @@ def read_nodes(daemons: dict) -> dict[str, dict]:
 
 
 def watch_cluster():
-    """Read the router and every node's agent, then scrape each engine.
+    """Read mentatd and every node's agent, then scrape each engine.
 
     Token rates come from differencing the totals, because vLLM publishes
     counters and a counter says nothing about now.
     """
     while True:
-        router, err = None, "MENTAT_ROUTER_URL is not set"
-        if MENTAT_ROUTER_URL:
-            try:
-                router, err = _get_json(MENTAT_ROUTER_URL.rstrip("/") + "/"), None
-            except Exception as e:
-                err = f"{type(e).__name__}: {e}"
-        nodes = read_nodes((router or {}).get("daemons") or {})
+        try:
+            mentat, err = cluster_from_status(
+                _get_json(f"http://{MENTAT_HTTP}/status")), None
+        except Exception as e:
+            mentat, err = None, f"{type(e).__name__}: {e}"
+        nodes = read_nodes((mentat or {}).get("daemons") or {})
         with _cluster_lock:
-            _cluster.update(router=router, router_error=err, nodes=nodes)
-        groups = (router or {}).get("groups") or {}
+            _cluster.update(mentat=mentat, mentat_error=err, nodes=nodes)
+        groups = (mentat or {}).get("groups") or {}
         for name, g in groups.items():
             if g.get("openai"):
                 sample_load(name, g["openai"])
         with _load_lock:
             for gone in set(_load) - set(groups):
                 _load.pop(gone, None)
+            for gone in set(_load_err) - set(groups):
+                _load_err.pop(gone, None)
         time.sleep(LOAD_INTERVAL_S)
 
 
@@ -559,9 +617,10 @@ def sample_load(name: str, url: str):
                 f"{parts.scheme}://{parts.netloc}/metrics",
                 timeout=FETCH_TIMEOUT_S) as r:
             m = _parse_metrics(r.read().decode("utf-8", "replace"))
-    except Exception:
+    except Exception as e:
         with _load_lock:
             _load.pop(name, None)
+            _load_err[name] = f"no /metrics: {type(e).__name__}"
         _load_prev.pop(name, None)
         return
     now = time.time()
@@ -581,6 +640,7 @@ def sample_load(name: str, url: str):
     _load_prev[name] = (now, m.get("prompt", 0.0), m.get("gen", 0.0))
     with _load_lock:
         _load[name] = entry
+        _load_err.pop(name, None)
 
 
 TOOLS = {
@@ -626,8 +686,8 @@ TOOLS = {
 
 
 # --- cluster page -----------------------------------------------------------
-# Every agent reads the same router, so any node can draw the cluster and
-# there is no page that only one node can serve.
+# Every daemon holds the same cluster, so any node can draw it and there is
+# no page that only one node can serve.
 _CSS = """body{font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
 max-width:60rem;margin:2rem auto;padding:0 1rem;background:#111;color:#ddd}
 h1{font-size:1.2rem}h2{font-size:1rem;margin-top:2rem;color:#9ad}
@@ -654,11 +714,11 @@ def _driver_cell(dv: dict) -> str:
 
 
 def cluster_page() -> bytes:
-    snap = router_snapshot()
-    router = snap.get("router") or {}
-    groups = router.get("groups") or {}
+    snap = cluster_snapshot()
+    groups = (snap.get("mentat") or {}).get("groups") or {}
     with _load_lock:
         loads = dict(_load)
+        load_errs = dict(_load_err)
 
     # An engine URL names an address. Map each address back to the node that
     # holds it, so the models table can say where a model runs.
@@ -705,7 +765,8 @@ def cluster_page() -> bytes:
     for name, g in sorted(groups.items()):
         if not g.get("openai"):
             continue                    # agents and other MCP-only groups
-        healthy = bool(g.get("healthy"))
+        why_not = g.get("why_not") or load_errs.get(name)
+        healthy = not why_not and name in loads
         ld = loads.get(name) or {}
         if "gen_tps" in ld:
             # Prompt and generation are separate on purpose: a long prefill
@@ -722,18 +783,20 @@ def cluster_page() -> bytes:
             f"<tr><td>{_esc(', '.join(g.get('models') or [name]))}</td>"
             f"<td>{_esc(name)}</td><td>{_esc(node_of(g['openai']))}</td>"
             f"<td class={'ok' if healthy else 'bad'}>"
-            f"{'healthy' if healthy else _esc(g.get('why_not') or 'not ready')}</td>"
+            f"{'healthy' if healthy else _esc(why_not or 'not read yet')}</td>"
             f"<td>{tps}</td><td>{q}</td><td>{kv}</td>"
             f"<td class=dim>{_esc(g['openai'])}</td></tr>")
 
-    err = snap.get("router_error")
-    router_note = (f"<p class=bad>router unreachable: {_esc(err)}</p>" if err else "")
-    empty = "router unreachable" if err else "none routed"
+    err = snap.get("mentat_error")
+    mentat_note = (f"<p class=bad>mentatd unreachable: {_esc(err)}</p>" if err else "")
+    empty = "mentatd unreachable" if err else "none registered"
+    router = (f"&middot; routed by <a href=\"{_esc(MENTAT_ROUTER_URL)}/\" style=\"color:#9ad\">"
+              f"{_esc(MENTAT_ROUTER_URL)}</a>\n" if MENTAT_ROUTER_URL else "")
     html = f"""<!doctype html><meta charset=utf-8>
 <meta http-equiv=refresh content=10>
 <title>spark cluster</title><style>{_CSS}</style>
 <h1>spark cluster &middot; seen from {_esc(HOSTNAME)}</h1>
-{router_note}
+{mentat_note}
 <h2>nodes</h2>
 <table><tr><th>node</th><th>addresses</th><th>mentatd</th>
 <th>interlink tx/rx</th><th>driver faults</th><th>models</th></tr>
@@ -742,28 +805,78 @@ def cluster_page() -> bytes:
 <table><tr><th>model</th><th>group</th><th>node</th><th>state</th>
 <th>tokens/s</th><th>run/wait</th><th>kv</th>
 <th>serving</th></tr>{''.join(models) or f'<tr><td colspan=8 class=dim>{empty}</td></tr>'}</table>
-<p class=dim>from <a href="{_esc(MENTAT_ROUTER_URL)}/" style="color:#9ad">{_esc(MENTAT_ROUTER_URL)}</a>
-&middot; refreshes every 10s
+<p class=dim>from this node's mentatd
+{router}&middot; refreshes every 10s
 &middot; <a href="/status.json" style="color:#9ad">status.json</a></p>"""
     return html.encode()
 
 
 # --- who may ask ------------------------------------------------------------
-# The network is the only control: the endpoint answers our own subnets and
-# the router. Docker bridge ranges are absent on purpose, so a container on
-# this host cannot read host state just by being here. A bridge-networked
-# client still reaches the agent when it dials a real host address, because
-# Docker masquerades the source to the host's own IP on that route.
-# Address prefixes, not CIDR blocks. Loopback alone by default: the compose
-# file takes the real subnets from the node's .env.
+# The network is the only control: the endpoint answers loopback, this node's
+# own subnets and the router. Docker bridge ranges are absent on purpose, so a
+# container on this host cannot read host state just by being here. A
+# bridge-networked client still reaches the agent when it dials a real host
+# address, because Docker masquerades the source to the host's own IP on that
+# route.
+#
+# ALLOWED_SOURCES replaces the subnets: comma-separated CIDR blocks or address
+# prefixes ("192.168.1."). Loopback and the router stay allowed either way.
 ALLOWED_SOURCES = [p.strip() for p in os.environ.get(
-    "ALLOWED_SOURCES", "127.0.0.1").split(",") if p.strip()]
-# The router forwards every merged tool call, so its address is always let in.
+    "ALLOWED_SOURCES", "").split(",") if p.strip()]
 ROUTER_HOST = urllib.parse.urlsplit(MENTAT_ROUTER_URL).hostname or ""
+# Interfaces whose subnets are never let in: container bridges and veths.
+_BRIDGE_PREFIXES = ("docker", "br-", "veth", "cni", "flannel", "virbr")
+# A fabric cable plugged in later brings a new subnet, so they are re-read.
+SUBNETS_TTL_S = 30.0
+_subnets: tuple[float, list] = (0.0, [])
+_subnets_lock = threading.Lock()
+
+
+def local_subnets() -> list:
+    """This node's IPv4 and IPv6 subnets, from `ip -j addr`, without bridges."""
+    global _subnets
+    with _subnets_lock:
+        if time.time() - _subnets[0] < SUBNETS_TTL_S:
+            return _subnets[1]
+        nets = []
+        try:
+            out = subprocess.run(["ip", "-j", "addr"], capture_output=True,
+                                 text=True, timeout=5).stdout
+            for link in json.loads(out or "[]"):
+                if link.get("ifname", "").startswith(_BRIDGE_PREFIXES):
+                    continue
+                for a in link.get("addr_info") or []:
+                    try:
+                        nets.append(ipaddress.ip_interface(
+                            f"{a['local']}/{a['prefixlen']}").network)
+                    except (KeyError, ValueError):
+                        pass
+        except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+            print(f"local subnets: {type(e).__name__}: {e}", flush=True)
+        _subnets = (time.time(), nets)
+        return nets
+
+
+def _matches(addr, ip, rule: str) -> bool:
+    if "/" in rule:
+        try:
+            return ip is not None and ip in ipaddress.ip_network(rule, strict=False)
+        except ValueError:
+            return False
+    return addr.startswith(rule)
 
 
 def source_allowed(addr: str) -> bool:
-    return addr == ROUTER_HOST or any(addr.startswith(p) for p in ALLOWED_SOURCES)
+    addr = addr.removeprefix("::ffff:")
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        ip = None
+    if addr == ROUTER_HOST or (ip is not None and ip.is_loopback):
+        return True
+    if ALLOWED_SOURCES:
+        return any(_matches(addr, ip, r) for r in ALLOWED_SOURCES)
+    return ip is not None and any(ip in n for n in local_subnets())
 
 
 class Handler(BaseHTTPRequestHandler):

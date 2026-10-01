@@ -201,8 +201,6 @@ else
 	fail "no mentat key, so this box cannot join a mentat cluster" \
 		"pass --secret KEY with the same key on every box; make one for a new cluster with: openssl rand -hex 32"
 fi
-[ -f "$H/etc/spark/agent.env" ] && pass "/etc/spark/agent.env" ||
-	note "no /etc/spark/agent.env, so the spark agent will not start" "see README, Per-node settings"
 if [ "$docker_ok" = 1 ]; then
 	for c in mentatd spark-agent; do
 		policy=$($sudo docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$c" 2>/dev/null) || continue

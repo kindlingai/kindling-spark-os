@@ -183,8 +183,10 @@ These live in `/etc/spark` on each box's own disk, and the initramfs copies them
   `MENTAT_ANNOUNCE_IFACES` and `MENTAT_NODE_IP`. Without it `mentatd` does not start.
   `setup.sh --secret` writes one with the key alone, which is enough: `mentatd` waits for the LAN,
   uses its address, and finds the other boxes by their broadcasts on the same network.
-- `agent.env` for the spark agent: `MENTAT_ROUTER_URL` and `ALLOWED_SOURCES`. Without it the agent
-  does not start.
+- `agent.env` for the spark agent, optional. The agent reads the cluster from the local `mentatd`
+  and answers loopback and the box's own subnets. `MENTAT_ROUTER_URL` names the router, which the
+  page links and the agent always lets in. `ALLOWED_SOURCES` replaces the subnets with
+  comma-separated CIDR blocks or address prefixes.
 
 Boxes moving over from the container deployments should stop the `mentatd` and `spark-agent`
 containers (`docker update --restart=no` and `docker stop`). Otherwise they take the same ports.
@@ -204,7 +206,7 @@ Anything specific to one fleet goes in a site layer, so this repo carries no fle
 | Unit | What |
 |---|---|
 | `mentatd` | mentat node daemon (needs `/etc/spark/node.env`) |
-| `spark-agent` | status page and MCP tools on :8090, runs as `spark-agent` with `CAP_SYS_PTRACE` only (needs `/etc/spark/agent.env`) |
+| `spark-agent` | status page and MCP tools on :8090, runs as `spark-agent` with `CAP_SYS_PTRACE` only (settings in `/etc/spark/agent.env`, optional) |
 | `dispramd` | display carveout lender, on the validated driver only |
 | `spark-watchdog` | pets the SBSA watchdog while the box can still fork |
 | `spark-dmesg-snapshot.timer` | writes dmesg, docker and systemd state to `/var/log/spark` for the agent each minute |

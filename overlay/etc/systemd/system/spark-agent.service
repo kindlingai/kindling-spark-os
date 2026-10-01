@@ -5,18 +5,18 @@
 # can read an engine's Python stacks in any container. Everything it cannot read directly comes from
 # the files spark-log-snapshot.sh writes under /var/log/spark.
 #
-# Per-node settings come from /etc/spark/agent.env, which the initramfs copies from the box's own
-# disk: MENTAT_ROUTER_URL (the router the page reads models from; its host is also let into the
-# MCP port) and ALLOWED_SOURCES (comma-separated address prefixes allowed to reach :8090).
+# It needs no settings: it reads the cluster from the local mentatd and lets in loopback and this
+# box's own subnets. /etc/spark/agent.env, which the initramfs copies from the box's own disk, can
+# set MENTAT_ROUTER_URL (linked from the page, and always let in) and ALLOWED_SOURCES
+# (comma-separated CIDR blocks or address prefixes, in place of the subnets).
 [Unit]
 Description=Spark host agent
 After=network-online.target mentatd.service
 Wants=network-online.target
-ConditionPathExists=/etc/spark/agent.env
 
 [Service]
 User=spark-agent
-EnvironmentFile=/etc/spark/agent.env
+EnvironmentFile=-/etc/spark/agent.env
 Environment=AGENT_LOG_DIR=/var/log/spark
 Environment=PYTHONPATH=/opt/spark-agent/lib
 Environment=PY_SPY=/opt/spark-agent/lib/bin/py-spy
