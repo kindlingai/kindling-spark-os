@@ -55,7 +55,8 @@ kernel and initramfs in `/boot/sparkos/VERSION/`, and adds a GRUB entry. `--tria
 the next boot, once. Reboot when ready.
 
 Options: `--flavour nvidia-64k` (default; 64 KiB pages return about 2 GiB on a 128 GiB box, with
-THP off so `vm.min_free_kbytes` does not grow to 5% of RAM) or `nvidia`; `--version NAME`; `--site DIR` (below). `list` shows the installed images and GRUB's
+THP off so `vm.min_free_kbytes` does not grow to 5% of RAM, but see the mmap warning below) or
+`nvidia`; `--version NAME`; `--site DIR` (below). `list` shows the installed images and GRUB's
 state, `stack` the pair this setup image carries.
 
 ### Swap
@@ -65,6 +66,17 @@ load whose peak DGX OS absorbs gets OOM-killed. A swap header records its page s
 cannot use `/swap.img`. For a 64k image, `install` makes a parallel `/swap-64k.img` of the same size
 on that disk, once. It skips this with a warning if less than 32 GiB would stay free
 (`MIN_FREE_GIB`). At boot, `sparkos-swap` turns on whichever file matches the running page size.
+
+### Warning: load model weights into ordinary memory on the 64k kernel
+
+On the 64k kernel, a CUDA copy from a file-backed `mmap` to the GPU hangs. vLLM's default
+safetensors loader does exactly that: it copies each tensor from a view of the memory-mapped
+checkpoint. On spark-f1ff (driver 580.178.04), stock vLLM sat at shard 0 for over 13 minutes with
+libcuda spin-waiting and the GPU idle. With the shards read into ordinary memory first, the same
+model loaded in 1.4 s. The 4k kernel takes the same path at its usual, slower speed without hanging.
+
+On the 64k flavour, start vLLM with `--safetensors-load-strategy eager`. Any other loader must copy
+tensors into anonymous memory (for example `tensor.clone()`) before moving them to the GPU.
 
 ### Trial and promote
 
