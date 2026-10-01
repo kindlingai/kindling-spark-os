@@ -230,3 +230,14 @@ and each keeps its own license:
   contains them, so do not publish one.
 - `dispram/rmlist.c` compiles against NVIDIA's open-gpu-kernel-modules headers (MIT).
 - Everything else comes from Ubuntu under its usual licenses.
+
+## Credits
+
+kindling-spark-os is made by the members of [kindlingai](https://github.com/kindlingai):
+
+- [@mmastrac](https://github.com/mmastrac) (Matt Mastracci)
+- [@coffee-the-dev](https://github.com/coffee-the-dev) (Steve)
+- [@adapt-ai-systems](https://github.com/adapt-ai-systems)
+
+Thanks to [@joesinvestments](https://github.com/joesinvestments) (Joey) for testing and lots of early
+feedback.
