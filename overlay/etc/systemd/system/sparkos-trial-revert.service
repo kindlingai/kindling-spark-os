@@ -8,4 +8,4 @@ ConditionPathExists=!/run/sparkos-confirmed
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/systemctl reboot
+ExecStart=/usr/local/sbin/sparkos-trial-revert

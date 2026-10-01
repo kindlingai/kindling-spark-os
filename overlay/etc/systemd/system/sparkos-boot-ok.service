@@ -1,0 +1,14 @@
+# Tell GRUB this spark-os boot worked: clear the recordfail flag the menu entry set, as Ubuntu's
+# grub-common does for DGX OS. If a boot never gets here, the flag stays set and GRUB's next boot
+# picks DGX OS instead of this image (see /etc/grub.d/42_sparkos on the DGX OS root).
+[Unit]
+Description=Mark this spark-os boot as good for GRUB
+After=multi-user.target
+ConditionPathIsMountPoint=/run/sparkos/host
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/enter-dgx-os grub-editenv /boot/grub/grubenv unset recordfail
+
+[Install]
+WantedBy=multi-user.target

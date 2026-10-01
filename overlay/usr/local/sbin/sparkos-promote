@@ -11,9 +11,26 @@ set -euo pipefail
 version=$(cat /etc/spark-os-version)
 conf=/run/sparkos/host/boot/sparkos/$version/entry.conf
 [ -f "$conf" ] || { echo "sparkos-promote: no $conf (is this image installed by kindling-setup?)" >&2; exit 1; }
+# GRUB sends the next boot to DGX OS unless sparkos-boot-ok clears the recordfail flag. An image
+# built before that unit existed would bounce back to DGX OS on its second boot as the default.
+if ! systemctl is-enabled --quiet sparkos-boot-ok.service 2>/dev/null; then
+	echo "sparkos-promote: this image has no sparkos-boot-ok.service; install a newer image first" >&2
+	exit 1
+fi
 touch /run/sparkos-confirmed
 sed -i 's/^TRIAL=.*/TRIAL=0/' "$conf"
-enter-dgx-os update-grub 2>&1 | grep -E "spark-os|done" || true
+if ! out=$(enter-dgx-os update-grub 2>&1); then
+	echo "$out" >&2
+	echo "sparkos-promote: update-grub failed; the default boot is unchanged" >&2
+	exit 1
+fi
+# The saved default must point at an entry that has lost its trial flag. Otherwise every boot is a
+# trial, and the 10-minute revert would reboot into this same entry over and over.
+entry=$(sed -n "/--id sparkos-$version {/,/^}/p" /run/sparkos/host/boot/grub/grub.cfg)
+if [ -z "$entry" ] || echo "$entry" | grep -q sparkos.trial; then
+	echo "sparkos-promote: grub.cfg has no non-trial entry for $version; the default boot is unchanged" >&2
+	exit 1
+fi
 enter-dgx-os grub-set-default "sparkos-$version"
 enter-dgx-os grub-editenv list
 echo "spark-os $version is now the default boot"

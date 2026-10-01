@@ -46,6 +46,14 @@ in_host() {
   ' in_host "$host" "$@"
 }
 
+# update-grub in the DGX OS root. A failure is fatal: it would leave GRUB describing images that
+# are not there, or missing ones that are.
+update_grub() {
+  local out
+  out=$(in_host update-grub 2>&1) || { echo "$out" >&2; die "update-grub failed"; }
+  echo "$out" | grep -E "spark-os|done" || true
+}
+
 check_host() {
   [ -f "$host/etc/os-release" ] || die "$host is not a root filesystem; mount the DGX OS root at /host"
   grep -q '^VERSION_ID="24.04"' "$host/etc/os-release" || die "$host is not Ubuntu 24.04"
@@ -131,7 +139,7 @@ EOF
   install -d "$host/etc/default/grub.d"
   [ -f "$host/etc/default/grub.d/99-sparkos.cfg" ] || echo 'GRUB_DEFAULT=saved' > "$host/etc/default/grub.d/99-sparkos.cfg"
   in_host grub-editenv list | grep -q '^saved_entry=' || in_host grub-editenv - set saved_entry=0
-  in_host update-grub 2>&1 | grep -E "spark-os|done" || true
+  update_grub
   rm -rf "$out"
   parallel_swap
   echo "installed spark-os $version"
@@ -161,7 +169,7 @@ remove() {
   fi
   rm -f "$host$(. "$conf"; echo "$IMAGE")"
   rm -rf "$d"
-  in_host update-grub 2>&1 | grep -E "spark-os|done" || true
+  update_grub
   echo "removed spark-os $version"
 }
 

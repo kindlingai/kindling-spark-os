@@ -1,0 +1,11 @@
+#!/bin/sh
+# Undo an unconfirmed trial boot: reboot into DGX OS.
+#
+# A one-shot grub-reboot is spent by now, so a reboot normally lands in DGX OS. But if GRUB's saved
+# default names this image (sparkos-promote ran, but the trial flag stuck), a plain reboot would
+# come straight back here every 10 minutes. In that case the default goes back to DGX OS first.
+version=$(cat /etc/spark-os-version)
+if /usr/local/sbin/enter-dgx-os grub-editenv /boot/grub/grubenv list | grep -qx "saved_entry=sparkos-$version"; then
+	/usr/local/sbin/enter-dgx-os grub-editenv /boot/grub/grubenv set saved_entry=0
+fi
+exec systemctl reboot

@@ -80,12 +80,20 @@ tensors into anonymous memory (for example `tensor.clone()`) before moving them 
 
 ### Trial and promote
 
-A new image boots in trial mode: `sparkos.trial panic=10` on the cmdline. A failed mount panics and
-reboots, and an unconfirmed boot reboots after 10 minutes. GRUB's one-shot entry is gone by then,
-so both land back in DGX OS. If you don't get SSH up and running, it reverts back.
+A new image boots in trial mode: `sparkos.trial panic=10` on the cmdline. A panic reboots. An
+unconfirmed boot reboots 10 minutes after it starts. GRUB's one-shot entry is spent by then, so both
+land back in DGX OS. To keep a trial running past 10 minutes without promoting it, run
+`sudo touch /run/sparkos-confirmed`. That lasts for this boot only.
 
 Once the image is good, run `sparkos-promote` on it. That confirms the boot, drops the trial flag,
-and makes the image GRUB's default. DGX OS stays in the menu.
+and makes the image GRUB's default. It refuses if `update-grub` fails or the new entry still carries
+the trial flag. DGX OS stays in the menu.
+
+A promoted image still falls back by itself. Each spark-os entry calls GRUB's `recordfail` and
+boots with `panic=30`, and `sparkos-boot-ok.service` clears the flag once the image reaches
+multi-user. If a boot dies first, from a panic, a missing file, or a hang after spark-watchdog
+starts, GRUB's next boot goes to DGX OS (entry 0) with no one at the console. A hard hang earlier
+in boot still needs a power cycle, after which the same fallback applies.
 
 `enter-dgx-os [COMMAND]` runs a shell or command in the DGX OS install from spark-os, in a private
 mount namespace. Use it for anything the image leaves out: apt, update-grub, grub-reboot.
