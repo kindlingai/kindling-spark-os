@@ -30,6 +30,12 @@ mount -t overlay overlay -o lowerdir=$S/lower,upperdir=$S/rw/upper,workdir=$S/rw
 for f in etc/hostname etc/hosts etc/machine-id; do
 	[ -f "$S/host/$f" ] && cp -a "$S/host/$f" "${rootmnt}/$f"
 done
+# A spark-os-only hostname (kindling-setup install --hostname-kindling) replaces DGX OS's.
+if [ -s "$S/host/etc/kindling-spark-os/hostname" ]; then
+	name=$(cat "$S/host/etc/kindling-spark-os/hostname")
+	echo "$name" > "${rootmnt}/etc/hostname"
+	printf '127.0.1.1\t%s\n' "$name" >> "${rootmnt}/etc/hosts"
+fi
 cp -a $S/host/etc/ssh/ssh_host_* "${rootmnt}/etc/ssh/" 2>/dev/null
 for d in etc/NetworkManager/system-connections etc/netplan etc/spark; do
 	if [ -d "$S/host/$d" ]; then

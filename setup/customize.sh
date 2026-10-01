@@ -21,10 +21,11 @@ useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nolo
 # /run/sparkos/host. /var/log too, so the journal survives a reboot instead of filling the RAM
 # overlay. spark-watchdog's reset log must outlive the reset it records, or its "two resets in an
 # hour means stop" guard never fires. /var/lib/nfs holds the NFS server's export and lock-recovery
-# state. /srv and /var/tmp are where model recipes keep weights and compose directories
-# (/srv/models/...). kindling-setup install creates any source directory DGX OS lacks. A site layer
-# adds its own binds the same way.
-for d in home srv var/tmp var/log var/lib/docker var/lib/containerd var/lib/spark-watchdog var/lib/nfs; do
+# state. /srv is where model recipes look for weights by default (/srv/models/...). kindling-setup
+# install creates any source directory DGX OS lacks, and binds more with --mounts (EXTRA_MOUNTS).
+# A site layer adds its own binds the same way.
+for d in home srv var/log var/lib/docker var/lib/containerd var/lib/spark-watchdog var/lib/nfs ${EXTRA_MOUNTS:-}; do
+  d=${d#/}
   mkdir -p "/$d"
   echo "/run/sparkos/host/$d /$d none bind,nofail 0 0" >> /etc/fstab
 done
@@ -36,7 +37,7 @@ echo "init_on_alloc=0 iommu.passthrough=0 earlycon=uart,mmio32,0x16A00000 consol
 
 systemctl set-default multi-user.target
 systemctl enable ssh NetworkManager docker containerd nvidia-persistenced systemd-resolved \
-  systemd-timesyncd sparkos-users sparkos-swap sparkos-boot-ok spark-watchdog spark-dmesg-snapshot.timer sparkos-trial-revert.timer \
+  systemd-timesyncd var-lib-tailscale.mount sparkos-users sparkos-swap sparkos-boot-ok spark-watchdog spark-dmesg-snapshot.timer sparkos-trial-revert.timer \
   mentatd spark-agent dispramd spark-console
 # tty1 belongs to spark-console; the other consoles keep their gettys.
 systemctl mask getty@tty1.service autovt@tty1.service

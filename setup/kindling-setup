@@ -8,10 +8,12 @@
 # From spark-os, mount the DGX OS root disk instead: -v /run/sparkos/host:/host
 #
 # Commands:
-#   install [--flavour F] [--version V] [--site DIR] [--trial]
+#   install [--flavour F] [--version V] [--site DIR] [--packages "P ..."] [--sources FILE]
+#           [--mounts "DIR ..."] [--hostname-kindling] [--trial]
 #       Build an image and add it to GRUB. --trial also makes it the next boot, once. DGX OS stays
 #       the default until sparkos-promote is run from a booted image.
-#   build [--flavour F] [--version V] [--site DIR] [--out DIR]
+#   build [--flavour F] [--version V] [--site DIR] [--packages "P ..."] [--sources FILE]
+#         [--mounts "DIR ..."] [--out DIR]
 #       Build only, into --out (default /host/var/tmp/kindling-spark-os/VERSION).
 #   remove VERSION
 #       Delete an installed image and its GRUB entry. Refuses the image that is running.
@@ -23,6 +25,24 @@
 # --flavour is nvidia (4 KiB pages) or nvidia-64k (64 KiB pages; its struct page array is 1/16
 # the size, which returns about 2 GiB on a 128 GiB box, and it boots with THP off so the kernel's
 # free-memory reserve stays at ~45 MB rather than 5% of RAM). Default: nvidia-64k.
+#
+# --version names the image; the default is the release, kernel ABI and flavour (0.9-1019-64k), the
+# same on every box, with -2, -3 ... when that name is already installed here.
+#
+# --packages adds packages to the image, from Ubuntu, NVIDIA's repositories or a --sources file.
+# --sources FILE (repeatable) adds an apt source: a .list or .sources file on the DGX OS root, such as
+# /etc/apt/sources.list.d/tailscale.list. The keyrings it names are taken from the DGX OS root too.
+# Tailscale: --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale; the image binds
+# /var/lib/tailscale from the DGX OS root, so the box keeps its tailnet identity.
+#
+# --mounts "DIR ..." binds more directories from the DGX OS root, beside the built-in /home, /srv,
+# /var/log, /var/lib/docker, /var/lib/containerd, /var/lib/spark-watchdog and /var/lib/nfs. Model
+# recipes that keep weights or compose directories in /var/tmp want --mounts /var/tmp. System
+# directories (/, /etc, /usr, /boot, /run, ...) are refused. install creates a missing source.
+#
+# --hostname-kindling names the box kindling-XXXX under spark-os (XXXX: the last four hex digits of
+# its LAN port's MAC, as NVIDIA's gx10-XXXX), recorded in /etc/kindling-spark-os/hostname on the DGX
+# OS root. DGX OS keeps its own hostname. Delete that file to go back.
 #
 # --site DIR adds a site layer: DIR/root is copied over the image, DIR/packages.txt lists extra
 # packages, and DIR/customize.d/*.sh run inside the image after the base customize step. Default:
@@ -63,7 +83,7 @@ check_host() {
   done
 }
 
-flavour=nvidia-64k version= site= out= trial=0
+flavour=nvidia-64k version= site= out= trial=0 packages= sources=() mounts= hostname=
 parse() {
   while [ $# -gt 0 ]; do
     case $1 in
@@ -72,12 +92,34 @@ parse() {
       --site) site=$2; shift 2 ;;
       --out) out=$2; shift 2 ;;
       --trial) trial=1; shift ;;
+      --packages) packages="$packages $2"; shift 2 ;;
+      --sources) sources+=("$2"); shift 2 ;;
+      --mounts) mounts="$mounts $2"; shift 2 ;;
+      --hostname-kindling) hostname=kindling; shift ;;
       *) die "unknown option $1" ;;
     esac
   done
   case " $FLAVOURS " in *" $flavour "*) ;; *) die "flavour $flavour is not one of: $FLAVOURS" ;; esac
-  version=${version:-$(date -u +%Y%m%d-%H%M)-${KERNEL_ABI#*-}${flavour#nvidia}}
+  if [ -z "$version" ]; then
+    local base n=2
+    base=$(cat "$K/VERSION")-${KERNEL_ABI#*-}${flavour#nvidia}
+    version=$base
+    while [ -e "$host/boot/sparkos/$version" ]; do version=$base-$n; n=$((n + 1)); done
+  fi
   [[ $version =~ ^[A-Za-z0-9._-]+$ ]] || die "version may hold only letters, digits, '.', '_' and '-'"
+  local m
+  for m in $mounts; do
+    [[ $m == /?* && $m != *..* && $m =~ ^[A-Za-z0-9._/-]+$ ]] || die "--mounts needs absolute paths: $m"
+    case ${m%/} in
+      /|/etc|/etc/*|/usr|/usr/*|/bin|/sbin|/lib|/lib64|/boot|/boot/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/run|/run/*|/images|/images/*|/var|/var/lib)
+        die "--mounts $m: a system directory cannot be bound from DGX OS" ;;
+    esac
+  done
+  local src
+  for src in "${sources[@]}"; do
+    case $src in /*.list|/*.sources) ;; *) die "--sources needs an absolute .list or .sources path: $src" ;; esac
+    [ -f "$host$src" ] || die "--sources $src: no such file on the DGX OS root"
+  done
   if [ -z "$site" ] && [ -d "$host/etc/kindling-spark-os/site" ]; then site=$host/etc/kindling-spark-os/site; fi
   out=${out:-$host/var/tmp/kindling-spark-os/$version}
   # The build writes into $out and cleans it up afterwards, so it must not hold anything else.
@@ -97,7 +139,11 @@ build() {
   check_host
   echo "building spark-os $version: kernel $KERNEL_ABI-$flavour, driver $DRIVER${site:+, site layer $site}"
   # A failed build leaves a multi-GB rootfs behind, often on a disk that just ran out of space.
-  OUT=$out VERSION=$version FLAVOUR=$flavour SITE=$site HOST=$host "$K/setup/build-rootfs.sh" ||
+  [ -n "$packages" ] && echo "extra packages:$packages"
+  [ ${#sources[@]} -gt 0 ] && echo "extra apt sources: ${sources[*]}"
+  [ -n "$mounts" ] && echo "extra mounts:$mounts"
+  OUT=$out VERSION=$version FLAVOUR=$flavour SITE=$site HOST=$host EXTRA_PACKAGES=$packages \
+    EXTRA_SOURCES="${sources[*]}" EXTRA_MOUNTS=$mounts "$K/setup/build-rootfs.sh" ||
     { clean_out; die "build failed"; }
 }
 
@@ -148,6 +194,31 @@ install_file() {
   fi
 }
 
+# The box's LAN port MAC, as NVIDIA's gx10-XXXX names use: the default route's interface, else the
+# first physical en* port. Reads /proc and /sys, since the setup image has no ip command.
+lan_mac() {
+  local iface
+  iface=$(awk '$2 == "00000000" {print $1; exit}' /proc/net/route)
+  if [ -z "$iface" ]; then
+    for iface in /sys/class/net/en*; do [ -e "$iface/device" ] && break; done
+    iface=${iface##*/}
+  fi
+  cat "/sys/class/net/$iface/address"
+}
+
+# Records kindling-XXXX as this box's hostname under spark-os. The initramfs uses it in place of
+# DGX OS's.
+kindling_hostname() {
+  local mac name f=/etc/kindling-spark-os/hostname
+  mac=$(lan_mac) || die "cannot find the LAN port's MAC for --hostname-kindling"
+  mac=${mac//:/}
+  name=kindling-${mac: -4}
+  [ "$(cat "$host$f" 2>/dev/null)" = "$name" ] && return 0
+  install -d "$host${f%/*}"
+  echo "$name" > "$host$f"
+  change "set the spark-os hostname to $name ($f)" "rm $f"
+}
+
 install_image() {
   local d=$host/boot/sparkos/$version dir
   [ -e "$d" ] && die "$d already exists; pick another --version"
@@ -171,7 +242,7 @@ install_image() {
   change "added image /images/spark-os-$version.erofs and /boot/sparkos/$version/ (kernel, initrd, entry.conf)" \
     "rm -rf /boot/sparkos/$version /images/spark-os-$version.erofs && update-grub   (or: kindling-setup remove $version)"
   # Sources for the image's bind mounts (setup/customize.sh) that DGX OS may not have made.
-  for dir in /var/lib/spark-watchdog /var/lib/nfs /srv; do
+  for dir in /var/lib/spark-watchdog /var/lib/nfs /srv $mounts; do
     [ -d "$host$dir" ] && continue
     install -d "$host$dir"
     change "created $dir" "rmdir $dir"
@@ -189,6 +260,7 @@ install_image() {
     in_host grub-editenv - set saved_entry=0
     change "set GRUB saved_entry=0 (DGX OS)" "grub-editenv /boot/grub/grubenv unset saved_entry"
   fi
+  [ "$hostname" = kindling ] && kindling_hostname
   update_grub
   change "regenerated /boot/grub/grub.cfg" "update-grub, after the undos above"
   clean_out

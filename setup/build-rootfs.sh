@@ -35,8 +35,8 @@ subst() {
   sed -e 's/#.*//' -e "s/@KVER@/$kver/g" -e "s/@SERIES@/$DRIVER_SERIES/g" \
       -e "s/@DRIVER@/$DRIVER/g" -e "s/@DRIVER_UPSTREAM@/$DRIVER_UPSTREAM/g" "$@"
 }
-pkgs=$(subst "$K/setup/packages.txt" ${SITE:+$( [ -f "$SITE/packages.txt" ] && echo "$SITE/packages.txt")} |
-       xargs | tr ' ' ',')
+pkgs=$( { subst "$K/setup/packages.txt" ${SITE:+$( [ -f "$SITE/packages.txt" ] && echo "$SITE/packages.txt")}
+         printf '%s\n' ${EXTRA_PACKAGES:-}; } | xargs | tr ' ' ',')
 
 # Everything that is not a package, as one root-owned tar: the overlay, mentatd, the spark agent and
 # dispram.
@@ -71,6 +71,19 @@ fi
 install -m644 "$HOST/usr/share/keyrings/dgx_debian_prod.gpg" "$HOST/usr/share/keyrings/cuda_debian_prod.gpg" \
   /usr/share/keyrings/
 
+# Extra apt sources (kindling-setup --sources): files on the DGX OS root, with the keyrings they name
+# copied in the same way. mmdebstrap takes a .list or .sources file path as a source.
+extra_sources=() keyring_hooks=()
+for src in ${EXTRA_SOURCES:-}; do
+  cp "$HOST$src" "$work/${src##*/}"
+  extra_sources+=("$work/${src##*/}")
+  for key in $(grep -oE '(signed-by=|Signed-By: *)/[^] ]+' "$HOST$src" | sed -E 's/^(signed-by=|Signed-By: *)//'); do
+    [ -f "$HOST$key" ] || { echo "build-rootfs: $key, named in $src, is missing from the DGX OS root" >&2; exit 1; }
+    install -D -m644 "$HOST$key" "$key"
+    keyring_hooks+=(--setup-hook="mkdir -p \"\$1${key%/*}\" && cp $HOST$key \"\$1$key\"")
+  done
+done
+
 ubuntu=http://ports.ubuntu.com/ubuntu-ports
 comps="main restricted universe"
 nvidia_baseos=https://repo.download.nvidia.com/baseos/ubuntu/noble/arm64/
@@ -81,11 +94,12 @@ mmdebstrap --mode=root --variant=minbase --architectures=arm64 --include="$pkgs"
   --setup-hook='mkdir -p "$1/usr/share/keyrings" "$1/etc/apt/preferences.d"' \
   --setup-hook="cp $HOST/usr/share/keyrings/dgx_debian_prod.gpg $HOST/usr/share/keyrings/cuda_debian_prod.gpg \"\$1/usr/share/keyrings/\"" \
   --setup-hook='printf "Package: *\nPin: origin \"127.0.0.1\"\nPin-Priority: 1001\n" > "$1/etc/apt/preferences.d/kindling-stack"' \
+  "${keyring_hooks[@]}" \
   --essential-hook='chroot "$1" dpkg-divert --local --rename --add /usr/sbin/update-initramfs >/dev/null && ln -s /bin/true "$1/usr/sbin/update-initramfs"' \
   --essential-hook='mkdir -p "$1/usr/share/update-notifier" && printf "#!/bin/sh\nexit 0\n" > "$1/usr/share/update-notifier/notify-reboot-required" && chmod 755 "$1/usr/share/update-notifier/notify-reboot-required"' \
   --customize-hook="tar-in $work/overlay.tar /" \
   --customize-hook="copy-in $K/setup/customize.sh /tmp" \
-  --customize-hook='chroot "$1" /bin/bash /tmp/customize.sh && rm -f "$1/tmp/customize.sh"' \
+  --customize-hook="chroot \"\$1\" env EXTRA_MOUNTS='${EXTRA_MOUNTS:-}' /bin/bash /tmp/customize.sh && rm -f \"\$1/tmp/customize.sh\"" \
   "${site_hooks[@]}" \
   --customize-hook='chroot "$1" update-initramfs -c -k all' \
   --customize-hook='rm -rf "$1"/etc/apt/sources.list* "$1"/etc/apt/preferences.d/kindling-stack "$1"/var/lib/apt/lists/* "$1"/var/cache/apt/*' \
@@ -96,7 +110,8 @@ mmdebstrap --mode=root --variant=minbase --architectures=arm64 --include="$pkgs"
   "deb $ubuntu noble-security $comps" \
   "deb [signed-by=/usr/share/keyrings/dgx_debian_prod.gpg] $nvidia_baseos noble common dgx" \
   "deb [signed-by=/usr/share/keyrings/dgx_debian_prod.gpg] $nvidia_baseos noble-updates common dgx" \
-  "deb [signed-by=/usr/share/keyrings/cuda_debian_prod.gpg] $cuda /"
+  "deb [signed-by=/usr/share/keyrings/cuda_debian_prod.gpg] $cuda /" \
+  "${extra_sources[@]}"
 
 echo "$VERSION" > "$work/rootfs/etc/spark-os-version"
 cp "$K/VERSION" "$work/rootfs/etc/kindling/version"

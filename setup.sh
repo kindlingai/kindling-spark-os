@@ -3,6 +3,7 @@
 # a trial image beside DGX OS.
 #
 #   ./setup.sh [--check] [--yes] [--stack STACK] [--flavour nvidia-64k|nvidia] [--site DIR] [--no-trial]
+#              [--packages "P ..."] [--sources FILE] [--mounts "DIR ..."] [--hostname-kindling]
 #
 #   --check     only check the prerequisites; change nothing
 #   --yes       answer yes to both questions (physical access, and building and installing)
@@ -10,6 +11,13 @@
 #   --flavour   nvidia-64k (default) or nvidia (4 KiB pages)
 #   --site      a site layer directory on this box (default: /etc/kindling-spark-os/site if present)
 #   --no-trial  install without making it the next boot
+#   --packages  extra packages for the image, from Ubuntu, NVIDIA or a --sources file
+#   --sources   an apt source on DGX OS to install from, a .list or .sources file (repeatable)
+#   --mounts    more directories to bind from the DGX OS disk, such as /var/tmp
+#   --hostname-kindling  name the box kindling-XXXX under spark-os (XXXX from its LAN MAC)
+#
+# Tailscale, if DGX OS has it:
+#   ./setup.sh --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale
 #
 # Run it from a checkout or an unpacked download of the repository, on DGX OS or on a running
 # spark-os. It needs sudo; it never reboots. Afterwards: reboot, check the box, then run
@@ -22,7 +30,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 options="$*"
-check_only=0 yes=0 stack= flavour=nvidia-64k site= trial=1
+check_only=0 yes=0 stack= flavour=nvidia-64k site= trial=1 packages= sources=() mounts= hostname_kindling=0
 while [ $# -gt 0 ]; do
 	case $1 in
 		--check) check_only=1; shift ;;
@@ -31,6 +39,10 @@ while [ $# -gt 0 ]; do
 		--flavour) flavour=$2; shift 2 ;;
 		--site) site=$2; shift 2 ;;
 		--no-trial) trial=0; shift ;;
+		--packages) packages="$packages $2"; shift 2 ;;
+		--sources) sources+=("${2#/run/sparkos/host}"); shift 2 ;;
+		--mounts) mounts="$mounts $2"; shift 2 ;;
+		--hostname-kindling) hostname_kindling=1; shift ;;
 		-h|--help) sed -n '2,/^set -uo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "setup.sh: unknown option $1 (try --help)" >&2; exit 2 ;;
 	esac
@@ -157,6 +169,27 @@ if [ "$docker_ok" = 1 ]; then
 			"sudo docker update --restart=no $c"
 	done
 fi
+for src in "${sources[@]}"; do
+	if [ ! -f "$H$src" ]; then
+		fail "--sources $src: no such file on the DGX OS disk" "give the path as DGX OS sees it, such as /etc/apt/sources.list.d/tailscale.list"
+		continue
+	fi
+	missing=
+	for key in $(grep -oE '(signed-by=|Signed-By: *)/[^] ]+' "$H$src" | sed -E 's/^(signed-by=|Signed-By: *)//'); do
+		[ -f "$H$key" ] || missing="$missing $key"
+	done
+	[ -z "$missing" ] && pass "apt source $src" || fail "--sources $src names keyrings missing from DGX OS:$missing"
+done
+[ -n "$mounts" ] && pass "extra mounts:$mounts"
+[ -n "$packages" ] && pass "extra packages:$packages"
+# Tailscale on DGX OS but not asked for: the image would come up without it, and a box reached only
+# over the tailnet could not be reached for its trial.
+if [ -d "$H/var/lib/tailscale" ] && [[ " $packages " != *" tailscale "* ]]; then
+	ts=$(ls "$H"/etc/apt/sources.list.d/tailscale.* 2>/dev/null | head -1)
+	note "DGX OS runs Tailscale, but the image will not include it" \
+		"add: ${ts:+--sources ${ts#$H} }--packages tailscale   (the image keeps this box's tailnet identity)"
+fi
+[ "$hostname_kindling" = 1 ] && pass "hostname under spark-os: kindling-XXXX from the LAN MAC"
 [ -n "$site" ] || { [ -d "$H/etc/kindling-spark-os/site" ] && site=/host/etc/kindling-spark-os/site; }
 [ -n "$site" ] && pass "site layer: ${site#/host}" || pass "no site layer"
 
@@ -210,6 +243,10 @@ echo "installing (about 4 minutes)..."
 args=(install --flavour "$flavour")
 [ "$trial" = 1 ] && args+=(--trial)
 [ -n "$site" ] && args+=(--site "$site")
+[ -n "$packages" ] && args+=(--packages "$packages")
+for src in "${sources[@]}"; do args+=(--sources "$src"); done
+[ -n "$mounts" ] && args+=(--mounts "$mounts")
+[ "$hostname_kindling" = 1 ] && args+=(--hostname-kindling)
 install_out=$(mktemp)
 $sudo docker run --rm --privileged --network host -v "$host:/host" "$tag" "${args[@]}" | tee "$install_out"
 installed=$(sed -n 's/^installed spark-os //p' "$install_out")

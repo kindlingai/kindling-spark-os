@@ -12,8 +12,8 @@ by making use of GPU RAM that normally goes unused.
 
 The image is an erofs file on the box's own root disk. At boot the initramfs mounts it under a RAM
 overlay, copies the box's identity in (hostname, machine-id, ssh host keys, network config,
-`/etc/spark`), and binds `/home`, `/srv`, `/var/tmp`, `/var/log`, `/var/lib/docker`,
-`/var/lib/containerd`, `/var/lib/spark-watchdog` and `/var/lib/nfs` from the root disk. At boot,
+`/etc/spark`), and binds `/home`, `/srv`, `/var/log`, `/var/lib/docker`, `/var/lib/containerd`,
+`/var/lib/spark-watchdog` and `/var/lib/nfs` from the root disk (`--mounts` adds more). At boot,
 `sparkos-users` copies in the DGX OS install's login users (uid 1000 and up) and its
 `/etc/sudoers.d`, so whoever logs in to DGX OS logs in here too, with the same password and keys.
 Each user gets exactly its DGX OS group memberships, so the same rights, and a shell the image lacks
@@ -87,10 +87,35 @@ From a running spark-os, mount the DGX OS root disk instead:
 kernel and initramfs in `/boot/sparkos/VERSION/`, and adds a GRUB entry. `--trial` makes that entry
 the next boot, once. Reboot when ready.
 
-Options: `--flavour nvidia-64k` (default; 64 KiB pages return about 2 GiB on a 128 GiB box, with
-THP off so `vm.min_free_kbytes` does not grow to 5% of RAM, but see the mmap warning below) or
-`nvidia`; `--version NAME`; `--site DIR` (below). `list` shows the installed images and GRUB's
-state, `stack` the pair this setup image carries.
+Options:
+
+- `--flavour nvidia-64k` (default; 64 KiB pages return about 2 GiB on a 128 GiB box, with THP off
+  so `vm.min_free_kbytes` does not grow to 5% of RAM, but see the mmap warning below) or `nvidia`.
+- `--version NAME`. The default is the release, kernel ABI and flavour, such as `0.9-1019-64k`, the
+  same on every box, with `-2`, `-3`, ... when that name is already installed on the box.
+- `--packages "P ..."`: extra packages, from Ubuntu, NVIDIA's repositories or a `--sources` file.
+- `--sources FILE` (repeatable): an apt source on DGX OS, a `.list` or `.sources` file. The
+  keyrings it names come from DGX OS as well.
+- `--mounts "DIR ..."`: more directories to bind from the DGX OS disk. Recipes that keep weights or
+  compose directories in `/var/tmp` want `--mounts /var/tmp`. System directories are refused.
+- `--hostname-kindling`: under spark-os, name the box `kindling-XXXX`, where XXXX is the last four
+  hex digits of its LAN port's MAC (NVIDIA names boxes `gx10-XXXX` the same way). DGX OS keeps its
+  own hostname. It is recorded in `/etc/kindling-spark-os/hostname` on the DGX OS disk; delete that
+  file to go back.
+- `--site DIR` (below).
+
+`setup.sh` takes the same options. `list` shows the installed images and GRUB's state, and `stack`
+shows the pair this setup image carries.
+
+### Tailscale
+
+On a box that runs Tailscale under DGX OS, install it in the image from the same apt source:
+
+    ./setup.sh --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale
+
+The image binds `/var/lib/tailscale` from the DGX OS disk, so the box keeps its tailnet identity and
+needs no new login. `setup.sh --check` points this out when DGX OS has Tailscale and the options do
+not. Without it, a box reached only over the tailnet is unreachable on its trial boot and reverts.
 
 ### Swap
 
