@@ -203,8 +203,11 @@ commit. Keep it that way. A new upstream version is a deliberate change with its
 - Restarting mentatd on the box that heads a model group kills that group, and the model has to be
   restarted. Never restart mentatd blindly. `sparkos-mentatd-check` restarts it only when it has
   stopped answering `/healthz`.
-- mentatd reads `MENTAT_NODE_IP` once at start but re-reads its announce interfaces on every
-  announcement, so a cable plugged in later needs no restart.
+- mentatd picks its node address once, at start, and re-reads its announce interfaces on every
+  announcement, so a cable plugged in later needs no restart. With no `MENTAT_NODE_IP` and no
+  route yet, mentatd 0.17 takes 127.0.0.1, which every such box shares, and they never mesh.
+  `mentatd.service` waits for a route first. Leave `MENTAT_NODE_IP` unset unless the box's
+  identity must be something other than its LAN address.
 - A ConnectX port with no cable leaves the PCI bus. Nothing should require the fabric to boot.
 - RoCE runs at the largest IB MTU no bigger than the Ethernet MTU minus 88. A ConnectX port at 1500
   runs RoCE at 1024. `sparkos-mtu` raises ports below `--connectx-mtu` + 104 and never lowers one.
@@ -232,7 +235,7 @@ mentatd signs announcements with HMAC-SHA256. The key is the trimmed bytes of
 `MENTAT_SECRET_FILE` (or `MENTAT_SECRET`), not decoded, and every daemon and router in a cluster
 needs the same one. A new cluster makes one with `openssl rand -hex 32`. `setup.sh --secret KEY`
 writes it to `/etc/spark/mentat.key` (mode 400) and points `node.env` at it. A key alone is enough:
-mentatd takes the default route's address and finds peers by broadcast. A box with a different key
+mentatd waits for a route, takes the LAN address and finds peers by broadcast. A box with a different key
 installs fine and then never joins, so `setup.sh` refuses a `--secret` that differs from the box's
 existing key.
 

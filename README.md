@@ -179,10 +179,10 @@ mount namespace. Use it for anything the image leaves out: apt, update-grub, gru
 
 These live in `/etc/spark` on each box's own disk, and the initramfs copies them in:
 
-- `node.env` for `mentatd`: `MENTAT_NODE_IP`, `MENTAT_PEERS`, `MENTAT_ANNOUNCE_IFACES`,
-  `MENTAT_SECRET_FILE`. Without it `mentatd` does not start. `setup.sh --secret` writes one with the
-  key alone, which is enough: `mentatd` then uses the address of the default route, and finds the
-  other boxes by their broadcasts on the same network.
+- `node.env` for `mentatd`: `MENTAT_SECRET_FILE`, and optionally `MENTAT_PEERS`,
+  `MENTAT_ANNOUNCE_IFACES` and `MENTAT_NODE_IP`. Without it `mentatd` does not start.
+  `setup.sh --secret` writes one with the key alone, which is enough: `mentatd` waits for the LAN,
+  uses its address, and finds the other boxes by their broadcasts on the same network.
 - `agent.env` for the spark agent: `MENTAT_ROUTER_URL` and `ALLOWED_SOURCES`. Without it the agent
   does not start.
 
