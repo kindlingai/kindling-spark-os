@@ -58,9 +58,9 @@ Before changing anything, `setup.sh` asks whether you have physical access to th
 boot can need its HDMI output, a USB keyboard or a power cycle. `setup.sh` then builds the setup
 image and runs `kindling-setup install --trial`. The reboot is up to you.
 
-`setup.sh` appends every run to `~/kindling-spark-os-setup.log`: the checks, your answers, and each
-change to the box as a `change:` line followed by its `undo:` line. A person or an agent can reverse
-a run from the log. Before overwriting a file, setup copies it to
+`setup.sh` appends every run to `~/kindling-spark-os-setup.log`, each line stamped with its UTC
+time: the checks, your answers, and each change to the box as a `change:` line followed by its
+`undo:` line. A person or an agent can reverse a run from the log. Before overwriting a file, setup copies it to
 `/var/lib/kindling-spark-os/backup/<time>/`.
 
 After the reboot, check the box, then run `sparkos-promote` within 10 minutes to keep the image.

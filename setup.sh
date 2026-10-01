@@ -29,9 +29,9 @@
 # spark-os. It needs sudo; it never reboots. Afterwards: reboot, check the box, then run
 # sparkos-promote on it, or sparkos-rollback to go back.
 #
-# Every run is appended to ~/kindling-spark-os-setup.log (KINDLING_SETUP_LOG overrides the path):
-# the checks, the answers, and each change to the box as a "change:" line followed by an "undo:"
-# line, so a person or an agent can reverse exactly what a run did.
+# Every run is appended to ~/kindling-spark-os-setup.log (KINDLING_SETUP_LOG overrides the path),
+# each line stamped with its UTC time: the checks, the answers, and each change to the box as a
+# "change:" line followed by an "undo:" line. A person or an agent can reverse a run from the log.
 set -uo pipefail
 cd "$(dirname "$0")"
 
@@ -61,9 +61,11 @@ done
 
 if [ -t 1 ]; then ok=$'\e[32mok\e[0m' bad=$'\e[31mFAIL\e[0m' warn=$'\e[33mwarn\e[0m'; else ok=ok bad=FAIL warn=warn; fi
 
-# Everything from here on also goes to the log, without the colour codes.
+# Everything from here on also goes to the log, without the colour codes and with each line's UTC
+# time, so a slow step shows in the log. printf's %()T is a bash builtin and forks nothing per line.
 log=${KINDLING_SETUP_LOG:-$HOME/kindling-spark-os-setup.log}
-exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$log")) 2>&1
+exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' |
+	TZ=UTC bash -c 'while IFS= read -r l; do printf "%(%H:%M:%S)T %s\n" -1 "$l"; done' >> "$log")) 2>&1
 echo
 echo "=== $(date -u '+%Y-%m-%d %H:%M:%S UTC') setup.sh ${options:-(no options)} on $(hostname), as $(id -un), log $log"
 failed=0
