@@ -185,10 +185,10 @@ On a box that runs Tailscale under DGX OS, install it in the image from the same
 
     ./setup.sh --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale
 
-The image binds `/var/lib/tailscale` from the DGX OS disk whenever that directory exists, with no
-`--mounts` needed, so the box keeps its tailnet identity and login. `setup.sh --check` warns when DGX OS runs Tailscale and the options leave it out. A box
-reachable only over the tailnet cannot be reached on a trial boot without Tailscale, and reverts
-after 10 minutes.
+The image binds `/var/lib/tailscale` from the DGX OS disk by itself whenever that directory exists,
+so the box keeps its tailnet identity and login. `setup.sh --check` warns when DGX OS runs Tailscale
+and the options leave it out. A box reachable only over the tailnet cannot be reached on a trial
+boot without Tailscale, and reverts after 10 minutes.
 
 ### vLLM
 
