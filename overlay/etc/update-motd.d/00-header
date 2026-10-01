@@ -1,0 +1,24 @@
+#!/bin/sh
+# The ssh login banner: what is running, and the GPU at a glance. GB10's GPU shares system memory,
+# so nvidia-smi's memory.used reads N/A; the per-process figures from --query-compute-apps are the
+# GPU's share. Replaces Ubuntu's header. customize.sh turns off its help text and news.
+printf 'kindling spark OS %s (%s) on %s, kernel %s\n' "$(cat /etc/kindling/version 2>/dev/null)" \
+	"$(cat /etc/spark-os-version 2>/dev/null)" "$(hostname)" "$(uname -r)"
+
+nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,power.draw,clocks.sm \
+	--format=csv,noheader,nounits 2>/dev/null |
+	awk -F', ' '{ printf "  GPU      %s, %s%% busy, %s C, %.0f W, SM %s MHz\n", $1, $2, $3, $4, $5 }'
+
+gpu_mib=$(nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits 2>/dev/null |
+	awk '{ s += $1 } END { print s + 0 }')
+awk -v gpu="$gpu_mib" '
+	/^MemTotal:/ { total = $2 } /^MemAvailable:/ { avail = $2 }
+	/^SwapTotal:/ { st = $2 } /^SwapFree:/ { sf = $2 }
+	END { printf "  memory   %.1f GiB in GPU processes, %.1f of %.1f GiB available, swap %.1f of %.1f GiB used\n",
+		gpu / 1024, avail / 1048576, total / 1048576, (st - sf) / 1048576, st / 1048576 }' /proc/meminfo
+
+if [ -r /run/dispram/lent.json ]; then
+	lent=$(python3 -c 'import json; print(sum(r["size"] for r in json.load(open("/run/dispram/lent.json"))) / 2**30)' 2>/dev/null)
+	[ -n "$lent" ] && printf '  dispram  %.1f GiB of the display carveout lent\n' "$lent"
+fi
+echo
