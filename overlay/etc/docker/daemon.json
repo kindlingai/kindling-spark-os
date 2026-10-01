@@ -1,0 +1,15 @@
+{
+    "runtimes": {
+        "nvidia": {
+            "args": [],
+            "path": "nvidia-container-runtime"
+        }
+    },
+    "default-ulimits": {
+        "core": {
+            "Name": "core",
+            "Hard": 0,
+            "Soft": 0
+        }
+    }
+}

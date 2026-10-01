@@ -1,0 +1,33 @@
+# Supported kernel/driver pairs. Each Canonical-signed NVIDIA module package is built for one kernel
+# ABI and accepts exactly one driver version, so a pair is that ABI plus that driver. A pair is listed
+# here only after it has passed a trial boot (see README). Entries come from tools/pin-stack.sh.
+#
+# Ubuntu does not snapshot the ports archive, so an old pair's .debs can leave the mirror. The
+# container image built for a pair keeps them.
+default: 7.0.0-1019+580.178.04
+
+stacks:
+  7.0.0-1019+580.178.04:
+    validated: {date: 2026-10-01, boxes: [spark-f1ff], dispram: true}
+    kernel_abi: 7.0.0-1019
+    driver: 580.178.04-0ubuntu0.24.04.1
+    flavours: [nvidia, nvidia-64k]
+    debs:
+      - {name: libnvidia-cfg1-580, version: "580.178.04-0ubuntu0.24.04.1", url: "http://ports.ubuntu.com/ubuntu-ports/pool/restricted/n/nvidia-graphics-drivers-580/libnvidia-cfg1-580_580.178.04-0ubuntu0.24.04.1_arm64.deb", sha256: 4b25188ce3943d10ef41ad1e18e5c075e4a015fc3236d2050120c236cc8af766}
+      - {name: libnvidia-compute-580, version: "580.178.04-0ubuntu0.24.04.1", url: "http://ports.ubuntu.com/ubuntu-ports/pool/restricted/n/nvidia-graphics-drivers-580/libnvidia-compute-580_580.178.04-0ubuntu0.24.04.1_arm64.deb", sha256: 009267387ae7577dfac0027bd07cf5e793c86c1e07b1fd64c09a64029b5027d3}
+      - {name: linux-image-7.0.0-1019-nvidia, version: "7.0.0-1019.19~24.04.2", url: "http://ports.ubuntu.com/ubuntu-ports/pool/main/l/linux-signed-nvidia-7.0/linux-image-7.0.0-1019-nvidia_7.0.0-1019.19%7e24.04.2_arm64.deb", sha256: 35a4719cc1fc15a9a8a2faa9b0350c519c47b60cdf2d51fe63949b8cbf9c0c70}
+      - {name: linux-image-7.0.0-1019-nvidia-64k, version: "7.0.0-1019.19~24.04.2", url: "http://ports.ubuntu.com/ubuntu-ports/pool/main/l/linux-signed-nvidia-7.0/linux-image-7.0.0-1019-nvidia-64k_7.0.0-1019.19%7e24.04.2_arm64.deb", sha256: c2e1fc559b938562bc69eb4657dac3fcadf8fda55f9337562a9376f329c5aece}
+      - {name: linux-modules-7.0.0-1019-nvidia, version: "7.0.0-1019.19~24.04.2", url: "http://ports.ubuntu.com/ubuntu-ports/pool/main/l/linux-nvidia-7.0/linux-modules-7.0.0-1019-nvidia_7.0.0-1019.19%7e24.04.2_arm64.deb", sha256: 067503b70a8e7ed2a519292a8d2423e904fa0440690b51ffb5164f215b542ce1}
+      - {name: linux-modules-7.0.0-1019-nvidia-64k, version: "7.0.0-1019.19~24.04.2", url: "http://ports.ubuntu.com/ubuntu-ports/pool/main/l/linux-nvidia-7.0/linux-modules-7.0.0-1019-nvidia-64k_7.0.0-1019.19%7e24.04.2_arm64.deb", sha256: a1c9db3120e267933b3487ae0f3e5a6971da154b32ff5e8a726ec624a93f9015}
+      - {name: linux-modules-nvidia-580-open-7.0.0-1019-nvidia, version: "7.0.0-1019.19~24.04.2+1", url: "http://ports.ubuntu.com/ubuntu-ports/pool/restricted/l/linux-restricted-signatures-nvidia-7.0/linux-modules-nvidia-580-open-7.0.0-1019-nvidia_7.0.0-1019.19%7e24.04.2%2b1_arm64.deb", sha256: a7ee3b5224bdc5227bbb84f9b1978434727ddf64713b577dca224abbf1c7d29d}
+      - {name: linux-modules-nvidia-580-open-7.0.0-1019-nvidia-64k, version: "7.0.0-1019.19~24.04.2+1", url: "http://ports.ubuntu.com/ubuntu-ports/pool/restricted/l/linux-restricted-signatures-nvidia-7.0/linux-modules-nvidia-580-open-7.0.0-1019-nvidia-64k_7.0.0-1019.19%7e24.04.2%2b1_arm64.deb", sha256: f4680b334fb62e02f9977f4ce05e3033cdcc1aa73f1a8055a0f36c533d25ffbe}
+      - {name: linux-modules-nvidia-fs-7.0.0-1019-nvidia, version: "7.0.0-1019.19~24.04.2", url: "http://ports.ubuntu.com/ubuntu-ports/pool/main/l/linux-nvidia-7.0/linux-modules-nvidia-fs-7.0.0-1019-nvidia_7.0.0-1019.19%7e24.04.2_arm64.deb", sha256: 80691d320834627dabd030f70a45a0411f4cc1289c50f391a039756ecc7f52ae}
+      - {name: linux-modules-nvidia-fs-7.0.0-1019-nvidia-64k, version: "7.0.0-1019.19~24.04.2", url: "http://ports.ubuntu.com/ubuntu-ports/pool/main/l/linux-nvidia-7.0/linux-modules-nvidia-fs-7.0.0-1019-nvidia-64k_7.0.0-1019.19%7e24.04.2_arm64.deb", sha256: dfedc9006c06b49859ae51a1d76a61af7bdd161f27b186e277722d922fae5c34}
+      - {name: linux-nvidia-7.0-tools-7.0.0-1019, version: "7.0.0-1019.19~24.04.2", url: "http://ports.ubuntu.com/ubuntu-ports/pool/main/l/linux-nvidia-7.0/linux-nvidia-7.0-tools-7.0.0-1019_7.0.0-1019.19%7e24.04.2_arm64.deb", sha256: 9a80e3b7f57b5cb39e391ca44f67bb17ae67d232bd2e72ac3b2ac712f2653bfe}
+      - {name: linux-tools-7.0.0-1019-nvidia, version: "7.0.0-1019.19~24.04.2", url: "http://ports.ubuntu.com/ubuntu-ports/pool/main/l/linux-nvidia-7.0/linux-tools-7.0.0-1019-nvidia_7.0.0-1019.19%7e24.04.2_arm64.deb", sha256: a20d8d396576bcbb2119b5d3d21be1ee72de7717bc9c2e976df1e5db38b9b317}
+      - {name: linux-tools-7.0.0-1019-nvidia-64k, version: "7.0.0-1019.19~24.04.2", url: "http://ports.ubuntu.com/ubuntu-ports/pool/main/l/linux-nvidia-7.0/linux-tools-7.0.0-1019-nvidia-64k_7.0.0-1019.19%7e24.04.2_arm64.deb", sha256: bddf04fdb8d8e6d7732ac3de47caf12faec7823c1b6ee21b28f5ae931cfb1eab}
+      - {name: linux-tools-common, version: "6.8.0-146.146", url: "http://ports.ubuntu.com/ubuntu-ports/pool/main/l/linux/linux-tools-common_6.8.0-146.146_all.deb", sha256: 85e04feef3d18834391d8352269e4e57d999ba0a81d11c09873e173266059fc2}
+      - {name: nvidia-compute-utils-580, version: "580.178.04-0ubuntu0.24.04.1", url: "http://ports.ubuntu.com/ubuntu-ports/pool/restricted/n/nvidia-graphics-drivers-580/nvidia-compute-utils-580_580.178.04-0ubuntu0.24.04.1_arm64.deb", sha256: b8fe7078088330ca4aacd36f126847c141b126a97a4849ac1f157c909d19bbae}
+      - {name: nvidia-firmware-580-580.178.04, version: "580.178.04-0ubuntu0.24.04.1", url: "http://ports.ubuntu.com/ubuntu-ports/pool/restricted/n/nvidia-graphics-drivers-580/nvidia-firmware-580-580.178.04_580.178.04-0ubuntu0.24.04.1_arm64.deb", sha256: 2eb99214bdc29f1b1185f99eda1d3b0eb842582fe173d2a0f7c88bb6dcb1269e}
+      - {name: nvidia-kernel-common-580, version: "580.178.04-0ubuntu0.24.04.1", url: "http://ports.ubuntu.com/ubuntu-ports/pool/restricted/n/nvidia-graphics-drivers-580/nvidia-kernel-common-580_580.178.04-0ubuntu0.24.04.1_arm64.deb", sha256: 3891e0ab76210f99bf9bed8a9248e3dba430a957bc98d3053c7f5dacdf15f276}
+      - {name: nvidia-utils-580, version: "580.178.04-0ubuntu0.24.04.1", url: "http://ports.ubuntu.com/ubuntu-ports/pool/restricted/n/nvidia-graphics-drivers-580/nvidia-utils-580_580.178.04-0ubuntu0.24.04.1_arm64.deb", sha256: e5bb3de5b9069187302a97d80acbdd16f105db2eebfb895193076959350563af}

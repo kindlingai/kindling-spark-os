@@ -1,0 +1,131 @@
+#!/bin/bash
+# Build a spark-os image for this box and install it beside DGX OS.
+#
+# Runs in the setup image, privileged, with the box's DGX OS root at /host. From DGX OS:
+#
+#   docker run --rm --privileged --network host -v /:/host kindling-spark-os install --trial
+#
+# From spark-os, mount the DGX OS root disk instead: -v /run/sparkos/host:/host
+#
+# Commands:
+#   install [--flavour F] [--version V] [--site DIR] [--trial]
+#       Build an image and add it to GRUB. --trial also makes it the next boot, once. DGX OS stays
+#       the default until sparkos-promote is run from a booted image.
+#   build [--flavour F] [--version V] [--site DIR] [--out DIR]
+#       Build only, into --out (default /host/var/tmp/kindling-spark-os/VERSION).
+#   list
+#       The images installed on the box, and GRUB's default and next entries.
+#   stack
+#       The kernel/driver pair this setup image carries.
+#
+# --flavour is nvidia (4 KiB pages) or nvidia-64k (64 KiB pages; its struct page array is 1/16
+# the size, which returns about 2 GiB on a 128 GiB box). Default: nvidia-64k.
+#
+# --site DIR adds a site layer: DIR/root is copied over the image, DIR/packages.txt lists extra
+# packages, and DIR/customize.d/*.sh run inside the image after the base customize step. Default:
+# /host/etc/kindling-spark-os/site when it exists.
+set -euo pipefail
+K=/opt/kindling
+host=${HOST_ROOT:-/host}
+# shellcheck source=/dev/null
+. "$K/stack/stack.env"
+
+die() { echo "kindling-setup: $*" >&2; exit 1; }
+
+# Runs a command in the DGX OS root. A private mount namespace keeps the /dev, /proc and /sys
+# binds from outliving the call. They are needed when /host is a bare disk (from spark-os) and
+# skipped when the host's own mounts are already there (from DGX OS, where -v binds recursively).
+in_host() {
+  unshare --mount --propagation private -- /bin/bash -euc '
+    host=$1; shift
+    for d in dev proc sys; do mountpoint -q "$host/$d" || mount --rbind "/$d" "$host/$d"; done
+    exec chroot "$host" "$@"
+  ' in_host "$host" "$@"
+}
+
+check_host() {
+  [ -f "$host/etc/os-release" ] || die "$host is not a root filesystem; mount the DGX OS root at /host"
+  grep -q '^VERSION_ID="24.04"' "$host/etc/os-release" || die "$host is not Ubuntu 24.04"
+  [ -d "$host/boot/grub" ] || die "$host/boot/grub is missing; is $host the DGX OS root?"
+  for k in dgx_debian_prod.gpg cuda_debian_prod.gpg; do
+    [ -f "$host/usr/share/keyrings/$k" ] || die "$host/usr/share/keyrings/$k is missing (needed for NVIDIA's repositories)"
+  done
+}
+
+flavour=nvidia-64k version= site= out= trial=0
+parse() {
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --flavour) flavour=$2; shift 2 ;;
+      --version) version=$2; shift 2 ;;
+      --site) site=$2; shift 2 ;;
+      --out) out=$2; shift 2 ;;
+      --trial) trial=1; shift ;;
+      *) die "unknown option $1" ;;
+    esac
+  done
+  case " $FLAVOURS " in *" $flavour "*) ;; *) die "flavour $flavour is not one of: $FLAVOURS" ;; esac
+  version=${version:-$(date -u +%Y%m%d-%H%M)-${KERNEL_ABI#*-}-${flavour#nvidia}}
+  version=${version%-}
+  [[ $version =~ ^[A-Za-z0-9._-]+$ ]] || die "version may hold only letters, digits, '.', '_' and '-'"
+  if [ -z "$site" ] && [ -d "$host/etc/kindling-spark-os/site" ]; then site=$host/etc/kindling-spark-os/site; fi
+  out=${out:-$host/var/tmp/kindling-spark-os/$version}
+}
+
+build() {
+  check_host
+  echo "building spark-os $version: kernel $KERNEL_ABI-$flavour, driver $DRIVER${site:+, site layer $site}"
+  OUT=$out VERSION=$version FLAVOUR=$flavour SITE=$site HOST=$host "$K/setup/build-rootfs.sh"
+}
+
+install_image() {
+  local d=$host/boot/sparkos/$version
+  [ -e "$d" ] && die "$d already exists; pick another --version"
+  install -d "$host/images" "$d"
+  install -m644 "$out/spark-os.erofs" "$host/images/spark-os-$version.erofs"
+  install -m644 "$out/vmlinuz" "$d/vmlinuz"
+  install -m644 "$out/initrd.img" "$d/initrd.img"
+  cat > "$d/entry.conf" <<EOF
+# One GRUB entry, read by /etc/grub.d/42_sparkos. Paths are on the root filesystem.
+NAME=$version
+STACK=$STACK
+KERNEL=/boot/sparkos/$version/vmlinuz
+INITRD=/boot/sparkos/$version/initrd.img
+IMAGE=/images/spark-os-$version.erofs
+CMDLINE="$(cat "$out/cmdline")"
+# 1 until sparkos-promote: the boot reverts to DGX OS unless confirmed within 10 minutes.
+TRIAL=1
+EOF
+  install -m755 "$K/setup/42_sparkos" "$host/etc/grub.d/42_sparkos"
+  # GRUB_DEFAULT=saved lets grub-reboot choose a single boot while DGX OS (entry 0) stays the default.
+  install -d "$host/etc/default/grub.d"
+  [ -f "$host/etc/default/grub.d/99-sparkos.cfg" ] || echo 'GRUB_DEFAULT=saved' > "$host/etc/default/grub.d/99-sparkos.cfg"
+  in_host grub-editenv list | grep -q '^saved_entry=' || in_host grub-editenv - set saved_entry=0
+  in_host update-grub 2>&1 | grep -E "spark-os|done" || true
+  rm -rf "$out"
+  echo "installed spark-os $version"
+  if [ "$trial" = 1 ]; then
+    in_host grub-reboot "sparkos-$version"
+    echo "the next boot, once, is spark-os $version; reboot when ready"
+  fi
+}
+
+list() {
+  local conf
+  for conf in "$host"/boot/sparkos/*/entry.conf; do
+    [ -f "$conf" ] || continue
+    ( . "$conf"; printf '%-28s stack %-24s trial=%s %s\n' "$NAME" "${STACK:-?}" "$TRIAL" \
+        "$(du -h "$host$IMAGE" 2>/dev/null | cut -f1)" )
+  done
+  in_host grub-editenv list
+}
+
+cmd=${1:---help}; shift || true
+case $cmd in
+  install) parse "$@"; build; install_image ;;
+  build) parse "$@"; build; echo "built $out" ;;
+  list) list ;;
+  stack) cat "$K/stack/stack.env" ;;
+  -h|--help|help) sed -n '2,/^set -euo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//' ;;
+  *) die "unknown command $cmd (try --help)" ;;
+esac

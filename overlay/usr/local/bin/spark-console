@@ -1,0 +1,63 @@
+#!/bin/bash
+# Cluster and box status for the console, redrawn every REFRESH seconds (default 30).
+# Esc or Enter hands the terminal to login. spark-console --once prints one screen and exits.
+set -u
+REFRESH=${REFRESH:-30}
+STATUS=${MENTAT_STATUS:-http://127.0.0.1:6380/status}
+
+node_ip() {  # a mentat node id is the hex of "mentat:<ip>" padded with NULs
+	printf '%b' "$(echo "$1" | sed -e 's/\(00\)*$//' -e 's/../\\x&/g')" | sed 's/^mentat://'
+}
+
+name_of() {  # a short hostname for an IP, or the IP
+	local n
+	n=$(getent hosts "$1" | awk '{print $2; exit}')
+	echo "${n%%.*}" | grep . || echo "$1"
+}
+
+render() {
+	local cols st now
+	cols=$(tput cols 2>/dev/null || echo 80)
+	now=$(date '+%Y-%m-%d %H:%M:%S %Z')
+	printf '%s  spark-os %s  %s\n' "$(hostname)" "$(cat /etc/spark-os-version 2>/dev/null || echo '?')" "$now"
+	printf '%*s\n' "$cols" '' | tr ' ' -
+	printf 'up %s, load %s\n' "$(uptime -p | sed 's/^up //')" "$(cut -d' ' -f1-3 /proc/loadavg)"
+	ip -o -4 addr show scope global | awk '$2 !~ /^(docker|br-|veth)/ {printf "  %-16s %s\n", $2, $4}'
+	nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,power.draw --format=csv,noheader 2>/dev/null \
+		| awk -F', ' '{printf "  GPU %s  util %s  %sC  %s\n", $1, $2, $3, $4}'
+	free -g | awk '/^Mem:/ {printf "  memory %d of %d GiB used\n", $3, $2}'
+	echo
+	echo "containers:"
+	# docker trims leading spaces from --format, so the indent is added after.
+	docker ps --format '{{printf "%-16s" .Names}} {{.Status}}' 2>/dev/null | head -8 | sed 's/^/  /'
+	echo
+	if ! st=$(curl -s -m 3 "$STATUS"); then
+		echo "mentat: not answering on $STATUS"
+		return
+	fi
+	local head
+	head=$(node_ip "$(echo "$st" | jq -r '.head_node_id')")
+	printf 'mentat: proto %s, head %s\n' "$(echo "$st" | jq -r .proto)" "$(name_of "$head")"
+	echo "$st" | jq -r '.peers | to_entries[] | [.key, (if .value.alive then (if .value.stale then "stale" else "up" end) else "DOWN" end), (.value.last_seen_ms // 0 | tostring)] | @tsv' \
+		| while IFS=$'\t' read -r id state seen; do
+			ip=$(node_ip "$id")
+			printf '  %-12s %-15s %-5s\n' "$(name_of "$ip")" "$ip" "$state"
+		done
+	local models
+	models=$(echo "$st" | jq -r '[.groups, (.peers[].groups)] | add | keys[] | select(startswith("agent-") | not)' 2>/dev/null | sort -u | paste -sd, -)
+	printf '  models: %s\n' "${models:-none}" | fold -s -w "$cols"
+}
+
+if [ "${1:-}" = --once ]; then render; exit 0; fi
+
+while :; do
+	clear
+	render
+	printf '\nEsc to log in - refreshes every %ss\n' "$REFRESH"
+	if IFS= read -rsn1 -t "$REFRESH" key; then
+		if [ "$key" = $'\e' ] || [ -z "$key" ]; then
+			clear
+			exec /bin/login
+		fi
+	fi
+done

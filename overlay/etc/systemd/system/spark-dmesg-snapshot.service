@@ -1,0 +1,10 @@
+# Snapshot dmesg, docker and systemd state into the directory the spark agent reads.
+# See spark-log-snapshot.sh for why the host does this rather than the container.
+[Unit]
+Description=Snapshot host logs for the spark agent
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/local/bin/spark-log-snapshot.sh

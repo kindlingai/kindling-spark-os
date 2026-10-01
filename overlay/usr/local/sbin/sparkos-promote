@@ -1,0 +1,19 @@
+#!/bin/bash
+# Make the running spark-os image the box's default boot.
+#
+#   sparkos-promote
+#
+# Confirms the current trial boot, so sparkos-trial-revert does not reboot it, then clears the
+# image's trial flag and sets its GRUB entry as the saved default. DGX OS stays in the menu as the
+# fallback: pick it at the GRUB menu, or run `enter-dgx-os grub-set-default 0`.
+set -euo pipefail
+[ "$(id -u)" = 0 ] || exec sudo -- "$0" "$@"
+version=$(cat /etc/spark-os-version)
+conf=/run/sparkos/host/boot/sparkos/$version/entry.conf
+[ -f "$conf" ] || { echo "sparkos-promote: no $conf (is this image installed by kindling-setup?)" >&2; exit 1; }
+touch /run/sparkos-confirmed
+sed -i 's/^TRIAL=.*/TRIAL=0/' "$conf"
+enter-dgx-os update-grub 2>&1 | grep -E "spark-os|done" || true
+enter-dgx-os grub-set-default "sparkos-$version"
+enter-dgx-os grub-editenv list
+echo "spark-os $version is now the default boot"

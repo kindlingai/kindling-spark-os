@@ -1,0 +1,11 @@
+# On a trial boot (sparkos.trial on the cmdline), reboot unless someone confirmed the boot from
+# outside by creating /run/sparkos-confirmed. GRUB's one-shot entry is spent by then, so the reboot
+# lands in DGX OS: a boot that came up without working ssh or networking undoes itself.
+[Unit]
+Description=Revert an unconfirmed spark-os trial boot
+ConditionKernelCommandLine=sparkos.trial
+ConditionPathExists=!/run/sparkos-confirmed
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl reboot

@@ -1,0 +1,19 @@
+#!/bin/sh
+# GRUB entries for the spark-os images installed beside DGX OS, newest first: one per
+# /boot/sparkos/*/entry.conf. Installed by kindling-spark-os; update-grub runs it.
+set -e
+for conf in $(ls -1 /boot/sparkos/*/entry.conf 2>/dev/null | sort -r); do
+  (
+    . "$conf"
+    trial=
+    [ "${TRIAL:-1}" = 1 ] && trial=" sparkos.trial panic=10"
+    echo "spark-os $NAME" >&2
+    cat <<EOF
+menuentry "spark-os $NAME" --id sparkos-$NAME {
+	search --no-floppy --fs-uuid --set=root $GRUB_DEVICE_UUID
+	linux $KERNEL root=UUID=$GRUB_DEVICE_UUID rw sparkos=$IMAGE$trial $CMDLINE
+	initrd $INITRD
+}
+EOF
+  )
+done

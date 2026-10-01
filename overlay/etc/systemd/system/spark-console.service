@@ -1,0 +1,23 @@
+# Cluster status on tty1 in place of a getty. Esc or Enter starts login; when the session
+# ends or login times out, the service exits and Restart= brings the status screen back.
+[Unit]
+Description=Cluster status on the console
+After=systemd-user-sessions.service mentatd.service
+Conflicts=getty@tty1.service
+Before=getty.target
+
+[Service]
+Environment=TERM=linux
+ExecStart=/usr/local/bin/spark-console
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+Restart=always
+RestartSec=0
+UtmpIdentifier=tty1
+
+[Install]
+WantedBy=getty.target

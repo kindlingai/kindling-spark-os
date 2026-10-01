@@ -1,0 +1,39 @@
+#!/bin/sh
+# Boot the read-only spark-os image when the kernel cmdline names one: sparkos=/path/on/the/root/disk.
+#
+# initramfs-tools has mounted the box's own root disk at ${rootmnt}. It moves to /run/sparkos/host,
+# the image goes under a RAM overlay, and the overlay becomes the new root. initramfs-tools carries
+# /run into the real system, so the root disk stays reachable there for the bind mounts in
+# /etc/fstab. Any failure panics; with panic=N on the cmdline that is a reboot, not a shell.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in prereqs) prereqs; exit 0 ;; esac
+. /scripts/functions
+
+img=""
+for arg in $(cat /proc/cmdline); do
+	case "$arg" in sparkos=*) img="${arg#sparkos=}" ;; esac
+done
+[ -n "$img" ] || exit 0
+
+S=/run/sparkos
+mkdir -p $S/host $S/lower $S/rw
+mount --move "${rootmnt}" $S/host || panic "sparkos: cannot move the root disk"
+[ -f "$S/host$img" ] || panic "sparkos: $img is not on the root disk"
+mount -t erofs -o ro,loop "$S/host$img" $S/lower || panic "sparkos: cannot mount $img"
+mount -t tmpfs -o size=4G,mode=0755 tmpfs $S/rw || panic "sparkos: cannot mount the overlay's tmpfs"
+mkdir -p $S/rw/upper $S/rw/work
+mount -t overlay overlay -o lowerdir=$S/lower,upperdir=$S/rw/upper,workdir=$S/rw/work "${rootmnt}" \
+	|| panic "sparkos: cannot mount the overlay"
+
+# The box's identity, copied in before systemd reads any of it.
+for f in etc/hostname etc/hosts etc/machine-id; do
+	[ -f "$S/host/$f" ] && cp -a "$S/host/$f" "${rootmnt}/$f"
+done
+cp -a $S/host/etc/ssh/ssh_host_* "${rootmnt}/etc/ssh/" 2>/dev/null
+for d in etc/NetworkManager/system-connections etc/netplan etc/spark; do
+	if [ -d "$S/host/$d" ]; then
+		mkdir -p "${rootmnt}/$d" && cp -a "$S/host/$d/." "${rootmnt}/$d/"
+	fi
+done
+exit 0

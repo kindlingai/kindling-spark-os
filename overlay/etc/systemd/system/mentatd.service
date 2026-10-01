@@ -1,0 +1,19 @@
+# The mentat node daemon, run from the image instead of a container. Per-node settings
+# (MENTAT_NODE_IP, MENTAT_PEERS, MENTAT_ANNOUNCE_IFACES, MENTAT_SECRET_FILE) come from
+# /etc/spark/node.env, which the initramfs copies from the box's own disk.
+#
+# Model containers register over 127.0.0.1:6379 and retry until the daemon answers, so
+# start order against docker only delays them.
+[Unit]
+Description=mentat node daemon
+After=network.target NetworkManager.service
+ConditionPathExists=/etc/spark/node.env
+
+[Service]
+EnvironmentFile=/etc/spark/node.env
+ExecStart=/usr/local/bin/mentatd daemon
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

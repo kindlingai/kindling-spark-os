@@ -1,0 +1,9 @@
+[Unit]
+Description=Revert an unconfirmed spark-os trial boot after 10 minutes
+ConditionKernelCommandLine=sparkos.trial
+
+[Timer]
+OnBootSec=10min
+
+[Install]
+WantedBy=timers.target

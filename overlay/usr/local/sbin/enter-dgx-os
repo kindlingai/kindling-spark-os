@@ -1,0 +1,25 @@
+#!/bin/bash
+# Run a shell, or COMMAND, inside the box's DGX OS install while spark-os is running.
+#
+#   enter-dgx-os [COMMAND [ARGS...]]
+#
+# The initramfs leaves DGX OS's root disk mounted at /run/sparkos/host. This chroots into it in a
+# private mount namespace, with /dev, /proc and /sys bound in and a fresh /run, so nothing it mounts
+# outlives it. DGX OS's /etc/resolv.conf points into /run, so the running resolver is bound there.
+# Use it for anything the image leaves out: apt, update-grub, building the next image.
+set -euo pipefail
+host=/run/sparkos/host
+[ "$(id -u)" = 0 ] || exec sudo -- "$0" "$@"
+mountpoint -q "$host" || { echo "enter-dgx-os: $host is not mounted (not booted from spark-os?)" >&2; exit 1; }
+[ $# -gt 0 ] || set -- /bin/bash -l
+exec unshare --mount --propagation private -- /bin/bash -euc '
+host=$1; shift
+for d in dev proc sys; do mount --rbind "/$d" "$host/$d"; done
+mount -t tmpfs tmpfs "$host/run"
+mkdir -p "$host/run/systemd/resolve"
+mount --bind /run/systemd/resolve "$host/run/systemd/resolve"
+# The running docker daemon, for docker commands inside (the image build pulls mentatd from it).
+if [ -S /run/docker.sock ]; then touch "$host/run/docker.sock"; mount --bind /run/docker.sock "$host/run/docker.sock"; fi
+# Ubuntu bashrc puts $debian_chroot in the prompt.
+exec env debian_chroot=dgx-os chroot "$host" "$@"
+' enter-dgx-os "$host" "$@"

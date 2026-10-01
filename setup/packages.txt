@@ -1,0 +1,92 @@
+# One package per line; `name=version` pins. Blank lines and # comments are ignored.
+# build-rootfs.sh fills in the stack's values: @KVER@ is the kernel release (ABI plus flavour, such as
+# 7.0.0-1019-nvidia-64k), @SERIES@ the driver series (580), @DRIVER@ the driver package version and
+# @DRIVER_UPSTREAM@ the driver release (580.178.04).
+
+# base system
+systemd
+systemd-sysv
+systemd-resolved
+systemd-timesyncd
+udev
+dbus
+kmod
+initramfs-tools
+# the initramfs needs busybox's mount for loop and overlay (it is only a Recommends)
+busybox-initramfs
+zstd
+locales
+tzdata
+
+# kernel, GPU driver and firmware: the stack repo
+linux-image-@KVER@
+linux-modules-@KVER@
+linux-modules-nvidia-@SERIES@-open-@KVER@
+linux-modules-nvidia-fs-@KVER@
+linux-tools-@KVER@
+linux-tools-common
+linux-firmware
+nvidia-firmware-@SERIES@-@DRIVER_UPSTREAM@
+nvidia-kernel-common-@SERIES@=@DRIVER@
+libnvidia-compute-@SERIES@=@DRIVER@
+libnvidia-cfg1-@SERIES@=@DRIVER@
+nvidia-utils-@SERIES@=@DRIVER@
+nvidia-compute-utils-@SERIES@=@DRIVER@
+nvidia-modprobe
+
+# containers
+docker-ce
+docker-ce-cli
+containerd.io
+docker-compose-plugin
+docker-buildx-plugin
+nvidia-container-toolkit
+
+# RDMA and ConnectX-7
+rdma-core
+ibverbs-utils
+ibverbs-providers
+rdmacm-utils
+infiniband-diags
+mstflint
+nvidia-mlnx-tools
+
+# DGX tuning: each installs one config fragment or script
+nv-cpu-governor
+nvidia-cppc-cpufreq-options
+nvidia-spark-limits
+nv-limits
+nvidia-kernel-defaults
+nv-persistence-mode
+nvidia-sbsa-gwdt-options
+nvidia-spark-realtek-mod-options
+nvidia-nvme-options
+nvidia-no-systemd-suspend
+dgx-spark-mlnx-hotplug
+nvidia-mstflint-loader
+nvidia-drm-options-modeset0
+nv-docker-options
+
+# network and admin
+network-manager
+openssh-server
+sudo
+ca-certificates
+curl
+rsync
+less
+vim-tiny
+python3
+jq
+lsof
+pciutils
+nvme-cli
+ethtool
+iproute2
+iputils-ping
+dnsutils
+nfs-common
+nfs-kernel-server
+htop
+# the spark agent's lsusb
+usbutils

@@ -1,0 +1,2 @@
+[vllm.general_plugins]
+dispram = dispram_vllm:register

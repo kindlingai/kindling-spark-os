@@ -1,0 +1,24 @@
+# Hardware watchdog, petted only while the machine can still start a process.
+# See spark-watchdog.py for why systemd's own RuntimeWatchdogSec does not cover
+# the failure these boxes actually have.
+[Unit]
+Description=Pet the SBSA watchdog while this node can still fork
+# Nothing else should hold /dev/watchdog; systemd would pet it unconditionally.
+ConditionPathExists=/dev/watchdog
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/spark-watchdog.py
+# Deliberately NOT Restart=always. If the daemon exits because the probe
+# failed, restarting it would resume petting and cancel the reset we want.
+Restart=on-failure
+RestartPreventExitStatus=3
+# The reset path needs SIGTERM to mean "disarm", which the script handles.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Environment=WATCHDOG_TIMEOUT_S=60
+Environment=WATCHDOG_INTERVAL_S=15
+Environment=WATCHDOG_FAILURES=4
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,83 @@
+diff --git a/vllm/v1/worker/gpu_worker.py b/vllm/v1/worker/gpu_worker.py
+--- a/vllm/v1/worker/gpu_worker.py
++++ b/vllm/v1/worker/gpu_worker.py
+@@ -92,7 +92,7 @@
+     maybe_apply_startup_plan,
+     maybe_save_startup_plan,
+ )
+-from vllm.v1.worker.utils import is_residual_scattered_for_sp
++from vllm.v1.worker.utils import dispram_reserve_bytes, is_residual_scattered_for_sp
+ from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
+ from vllm.v1.worker.workspace import init_workspace_manager
+ 
+@@ -569,6 +569,18 @@
+ 
+     @torch.inference_mode()
+     def determine_available_memory(self) -> int:
++        """KV cache memory: what profiling leaves, plus any display carveout dispram lends."""
++        available = self._determine_available_memory()
++        extra = dispram_reserve_bytes()
++        if extra:
++            logger.info(
++                "Adding %s GiB of display carveout (dispram) to %s GiB of KV cache memory",
++                format_gib(extra),
++                format_gib(available),
++            )
++        return available + extra
++
++    def _determine_available_memory(self) -> int:
+         """Profiles the peak memory usage of the model to determine how much
+         memory can be used for KV cache without OOMs.
+ 
+diff --git a/vllm/v1/worker/utils.py b/vllm/v1/worker/utils.py
+--- a/vllm/v1/worker/utils.py	2026-10-01 12:15:25
++++ b/vllm/v1/worker/utils.py	2026-10-01 12:15:41
+@@ -386,6 +386,39 @@
+     raise ValueError(f"No common block size for {kv_manager_block_size}.")
+ 
+ 
++def _dispram():
++    """The dispram client, when it is importable and its daemon is running, else None.
++
++    dispram lends the GB10 display carveout, 2 GiB that the driver reserves and never uses on that
++    chip, to CUDA processes: https://github.com/kindlingai/kindling-spark-os/tree/main/dispram
++    """
++    try:
++        import dispram
++    except ImportError:
++        return None
++    return dispram if dispram.available() else None
++
++
++def dispram_reserve_bytes() -> int:
++    """Carveout bytes dispram can add to this worker's KV memory; 0 without dispram."""
++    dispram = _dispram()
++    return dispram.reserve_bytes() if dispram is not None else 0
++
++
++def _kv_backing_buffer(nbytes: int, device: torch.device) -> torch.Tensor:
++    """A zeroed int8 buffer for the KV cache. With dispram, its tail is the display carveout."""
++    dispram = _dispram()
++    if dispram is None:
++        return torch.zeros(nbytes, dtype=torch.int8, device=device)
++    buf, tail = dispram.glued_zeros(nbytes, device)
++    logger.info(
++        "KV cache buffer: %.2f GiB, of which %.2f GiB in the display carveout",
++        nbytes / 2**30,
++        tail / 2**30,
++    )
++    return buf
++
++
+ def allocate_kv_cache(
+     kv_cache_config: KVCacheConfig,
+     device: torch.device,
+@@ -418,7 +451,7 @@
+         buf_size = ((raw_size + page_size - 1) // page_size) * page_size
+     else:
+         buf_size = raw_size
+-    buf = torch.zeros(buf_size, dtype=torch.int8, device=device)
++    buf = _kv_backing_buffer(buf_size, device)
+ 
+     kv_caches: dict[str, torch.Tensor] = {}
+     for tensor in kv_cache_config.kv_cache_tensors:

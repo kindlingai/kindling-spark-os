@@ -1,0 +1,38 @@
+# The spark agent (github.com/mmastrac/spark-agent): node status page and MCP tools on :8090,
+# registered with the local mentatd as group agent-<hostname>.
+#
+# It observes and never changes the host. CAP_SYS_PTRACE is the one capability it holds, so py-spy
+# can read an engine's Python stacks in any container. Everything it cannot read directly comes from
+# the files spark-log-snapshot.sh writes under /var/log/spark.
+#
+# Per-node settings come from /etc/spark/agent.env, which the initramfs copies from the box's own
+# disk: MENTAT_ROUTER_URL (the router the page reads models from; its host is also let into the
+# MCP port) and ALLOWED_SOURCES (comma-separated address prefixes allowed to reach :8090).
+[Unit]
+Description=Spark host agent
+After=network-online.target mentatd.service
+Wants=network-online.target
+ConditionPathExists=/etc/spark/agent.env
+
+[Service]
+User=spark-agent
+EnvironmentFile=/etc/spark/agent.env
+Environment=AGENT_LOG_DIR=/var/log/spark
+Environment=PYTHONPATH=/opt/spark-agent/lib
+Environment=PY_SPY=/opt/spark-agent/lib/bin/py-spy
+Environment=SPARK_MEMORY_PY=/usr/local/bin/spark-memory.py
+ExecStart=/usr/bin/python3 /opt/spark-agent/spark-agent.py --port 8090
+Restart=always
+RestartSec=5
+
+AmbientCapabilities=CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_SYS_PTRACE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+# Refresh often enough to be useful for "what just happened", cheap enough to
+# ignore. Persistent=true so a snapshot is taken after a reboot -- which is
+# exactly when the previous boot's messages matter most.
+[Unit]
+Description=Refresh the host log snapshot for the spark agent
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

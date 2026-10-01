@@ -1,0 +1,23 @@
+# Lend the GB10 display carveout (2046 MiB the driver never uses on this chip) to CUDA processes.
+# See /opt/kindling/dispram and the README's dispram section.
+#
+# /etc/kindling/dispram.env names the driver release the stack validated dispram against. Without
+# it, or on any other driver, dispramd exits at once and lends nothing.
+[Unit]
+Description=Display carveout lender (dispram)
+After=nvidia-persistenced.service
+ConditionPathExists=/dev/nvidiactl
+ConditionPathExists=/etc/kindling/dispram.env
+
+[Service]
+EnvironmentFile=/etc/kindling/dispram.env
+Environment=DISPRAM_LIB=/opt/kindling/dispram/librmlist.so
+Environment=DISPRAM_SOCKET=/run/dispram/dispram.sock
+ExecStart=/usr/bin/python3 /opt/kindling/dispram/dispramd.py
+Restart=on-failure
+RestartSec=5
+# Exit 3 means the driver is not the validated one; restarting would not change that.
+RestartPreventExitStatus=3
+
+[Install]
+WantedBy=multi-user.target
