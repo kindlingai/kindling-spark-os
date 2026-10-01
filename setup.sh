@@ -22,7 +22,8 @@
 #               for a new cluster with: openssl rand -hex 32
 #
 # Tailscale, if DGX OS has it:
-#   ./setup.sh --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale
+#   ./setup.sh --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale \
+#              --mounts /var/lib/tailscale
 #
 # Run it from a checkout or an unpacked download of the repository, on DGX OS or on a running
 # spark-os. It needs sudo; it never reboots. Afterwards: reboot, check the box, then run
@@ -222,12 +223,13 @@ for src in "${sources[@]}"; do
 done
 [ -n "$mounts" ] && pass "extra mounts:$mounts"
 [ -n "$packages" ] && pass "extra packages:$packages"
-# Tailscale on DGX OS but not asked for: the image would come up without it, and a box reached only
-# over the tailnet could not be reached for its trial.
-if [ -d "$H/var/lib/tailscale" ] && [[ " $packages " != *" tailscale "* ]]; then
+# Tailscale on DGX OS but missing from the options: without the package, or without its state from
+# DGX OS, a box reached only over the tailnet cannot be reached for its trial.
+if [ -d "$H/var/lib/tailscale" ] && { [[ " $packages " != *" tailscale "* ]] ||
+	[[ " $mounts " != *" /var/lib/tailscale "* && " $mounts " != *" /var/lib/tailscale/ "* ]]; }; then
 	ts=$(ls "$H"/etc/apt/sources.list.d/tailscale.* 2>/dev/null | head -1)
-	note "DGX OS runs Tailscale, but the image will not include it" \
-		"add: ${ts:+--sources ${ts#$H} }--packages tailscale   (the image keeps this box's tailnet identity)"
+	note "DGX OS runs Tailscale, but the image will not include it with this box's tailnet login" \
+		"add: ${ts:+--sources ${ts#$H} }--packages tailscale --mounts /var/lib/tailscale"
 fi
 [ "$hostname_kindling" = 1 ] && pass "hostname under spark-os: kindling-XXXX from the LAN MAC"
 # MTUs the image will change at boot. A port that comes up with a larger MTU than its peer or

@@ -181,14 +181,15 @@ containers (`docker update --restart=no` and `docker stop`). Otherwise the conta
 
 ### Tailscale
 
-On a box that runs Tailscale under DGX OS, install it in the image from the same apt source:
+On a box that runs Tailscale under DGX OS, install it in the image from the same apt source, and
+bind its state from the DGX OS disk:
 
-    ./setup.sh --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale
+    ./setup.sh --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale \
+               --mounts /var/lib/tailscale
 
-The image binds `/var/lib/tailscale` from the DGX OS disk by itself whenever that directory exists,
-so the box keeps its tailnet identity and login. `setup.sh --check` warns when DGX OS runs Tailscale
-and the options leave it out. A box reachable only over the tailnet cannot be reached on a trial
-boot without Tailscale, and reverts after 10 minutes.
+With `/var/lib/tailscale` bound, the box keeps its tailnet identity and login. `setup.sh --check`
+warns when DGX OS runs Tailscale and the options leave it out. A box reachable only over the tailnet
+cannot be reached on a trial boot without Tailscale, and reverts after 10 minutes.
 
 ### vLLM
 

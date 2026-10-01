@@ -37,7 +37,7 @@ echo "init_on_alloc=0 iommu.passthrough=0 earlycon=uart,mmio32,0x16A00000 consol
 
 systemctl set-default multi-user.target
 systemctl enable ssh NetworkManager docker containerd nvidia-persistenced systemd-resolved \
-  systemd-timesyncd var-lib-tailscale.mount sparkos-mtu sparkos-users sparkos-swap sparkos-boot-ok spark-watchdog spark-dmesg-snapshot.timer sparkos-trial-revert.timer \
+  systemd-timesyncd sparkos-mtu sparkos-users sparkos-swap sparkos-boot-ok spark-watchdog spark-dmesg-snapshot.timer sparkos-trial-revert.timer \
   mentatd spark-agent dispramd spark-console
 # tty1 belongs to spark-console; the other consoles keep their gettys.
 systemctl mask getty@tty1.service autovt@tty1.service

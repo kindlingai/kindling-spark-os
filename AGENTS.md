@@ -77,7 +77,7 @@ every box. A name already on the box gets `-2`, `-3`. The GRUB entry id is `spar
   after a reboot (Docker creates an empty directory in its place, and the entrypoint exits 127).
 - `/run/sparkos/host` is the DGX OS root disk, read-write.
 - Bound from it: `/home`, `/srv`, `/var/log`, `/var/lib/docker`, `/var/lib/containerd`,
-  `/var/lib/spark-watchdog`, `/var/lib/nfs`, `/var/lib/tailscale` (if it exists), and anything
+  `/var/lib/spark-watchdog`, `/var/lib/nfs`, and anything
   given with `--mounts`.
 - `/etc/spark/node.env` and `agent.env` are copies, made at boot. Edit them on the DGX OS root
   (`/run/sparkos/host/etc/spark/`) and reboot, or edit both copies.

@@ -32,8 +32,8 @@
 # --packages adds packages to the image, from Ubuntu, NVIDIA's repositories or a --sources file.
 # --sources FILE (repeatable) adds an apt source: a .list or .sources file on the DGX OS root, such as
 # /etc/apt/sources.list.d/tailscale.list. The keyrings it names are taken from the DGX OS root too.
-# Tailscale: --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale; the image binds
-# /var/lib/tailscale from the DGX OS root, so the box keeps its tailnet identity.
+# Tailscale: --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale
+# --mounts /var/lib/tailscale. The mount keeps the box's tailnet identity from DGX OS.
 #
 # --mounts "DIR ..." binds more directories from the DGX OS root, beside the built-in /home, /srv,
 # /var/log, /var/lib/docker, /var/lib/containerd, /var/lib/spark-watchdog and /var/lib/nfs. Model
