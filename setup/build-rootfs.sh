@@ -102,8 +102,8 @@ echo "$VERSION" > "$work/rootfs/etc/spark-os-version"
 cp "$work/rootfs/boot/vmlinuz-$kver" "$OUT/vmlinuz"
 cp "$work/rootfs/boot/initrd.img-$kver" "$OUT/initrd.img"
 cp "$work/rootfs/etc/kernel/cmdline" "$OUT/cmdline"
-# 4 KiB blocks whatever the build host's page size: the kernel reads lz4-compressed erofs with
-# 4 KiB blocks under both flavours, and mkfs would otherwise pick 64 KiB on a 64k host.
+# 4 KiB blocks, mkfs's default, pinned because both flavours boot this format. On a 64k host mkfs
+# warns that compressed blocks smaller than a page are unsupported; the 64k kernel mounts them anyway.
 mkfs.erofs -b 4096 -zlz4hc "$OUT/spark-os.erofs" "$work/rootfs" >/dev/null
 rm -rf "$work"
 ls -l "$OUT/spark-os.erofs"
