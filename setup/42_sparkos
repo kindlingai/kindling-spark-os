@@ -6,8 +6,9 @@
 #   - every entry boots with panic=, so a panic reboots instead of hanging
 #   - every entry calls recordfail (from DGX OS's 00_header), and sparkos-boot-ok clears it once the
 #     image reaches multi-user. If it is still set when GRUB starts and the default is a spark-os
-#     entry, the default becomes entry 0, DGX OS. One-shot (grub-reboot) boots never save it, so
-#     trial boots rely on their own revert timer.
+#     entry, the default becomes entry 0, DGX OS. One-shot (grub-reboot) boots never save it and
+#     never take this fallback, so a flag left by an interrupted DGX OS boot cannot turn a queued
+#     trial into DGX OS. Trial boots rely on their own revert timer.
 #   - fallback=0 covers an entry GRUB cannot load at all
 #
 # No set -e: grub-mkconfig runs under set -e, so one failing entry here would stop DGX OS's own
@@ -39,6 +40,6 @@ done
 echo 'set fallback="0"'
 for id in $ids; do
   cat <<EOF
-if [ "\${recordfail}" = 1 -a "\${default}" = "$id" ]; then set default="0"; fi
+if [ "\${recordfail}" = 1 -a -z "\${boot_once}" -a "\${default}" = "$id" ]; then set default="0"; fi
 EOF
 done

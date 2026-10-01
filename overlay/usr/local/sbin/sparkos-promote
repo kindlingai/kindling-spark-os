@@ -20,8 +20,9 @@ fi
 touch /run/sparkos-confirmed
 sed -i 's/^TRIAL=.*/TRIAL=0/' "$conf"
 if ! out=$(enter-dgx-os update-grub 2>&1); then
+	sed -i 's/^TRIAL=.*/TRIAL=1/' "$conf"
 	echo "$out" >&2
-	echo "sparkos-promote: update-grub failed; the default boot is unchanged" >&2
+	echo "sparkos-promote: update-grub failed; the image is still a trial and the default boot is unchanged" >&2
 	exit 1
 fi
 # The saved default must point at an entry that has lost its trial flag. Otherwise every boot is a
