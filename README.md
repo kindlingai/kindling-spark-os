@@ -20,11 +20,12 @@ The image is an erofs file on the DGX OS disk, and every boot starts from the sa
   `/var/lib/spark-watchdog` and `/var/lib/nfs` from the DGX OS disk. `--mounts` adds more.
 - `sparkos-users` copies in DGX OS's login users (uid 1000 and up) and `/etc/sudoers.d`
 
-Users log in with their DGX OS passwords and keys, and keep their DGX OS group memberships. A user
-whose shell the image lacks gets `/bin/bash`. The image's own `admin` user exists only when no DGX
-OS user holds uid 1000. `/etc/subuid` and `/etc/subgid` stay on DGX OS.
+Users log in with their DGX OS passwords and keys, and keep their DGX OS group memberships. If a
+user's login shell is missing from the image, that user gets `/bin/bash`. The image has a fallback
+`admin` user at uid 1000, and `sparkos-users` removes it when DGX OS has a user with uid 1000.
+`/etc/subuid` and `/etc/subgid` stay on DGX OS.
 
-DGX OS stays installed as the rescue system and owns GRUB.
+DGX OS stays installed as the rescue system and manages GRUB.
 
 The image carries:
 
@@ -184,14 +185,14 @@ On a box that runs Tailscale under DGX OS, install it in the image from the same
 
     ./setup.sh --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale
 
-The image binds `/var/lib/tailscale` from the DGX OS disk, so the box keeps its tailnet identity and
-login. `setup.sh --check` warns when DGX OS runs Tailscale and the options leave it out. A box
+The image binds `/var/lib/tailscale` from the DGX OS disk whenever that directory exists, with no
+`--mounts` needed, so the box keeps its tailnet identity and login. `setup.sh --check` warns when DGX OS runs Tailscale and the options leave it out. A box
 reachable only over the tailnet cannot be reached on a trial boot without Tailscale, and reverts
 after 10 minutes.
 
 ### vLLM
 
-On the 64k kernel, a CUDA copy to the GPU from a file-backed `mmap` hangs. vLLM's default
+On the 64k kernel, CUDA hangs when it copies from a file-backed `mmap` to the GPU. vLLM's default
 safetensors loader makes that copy for every tensor in the memory-mapped checkpoint. On a test box
 (driver 580.178.04), stock vLLM sat at shard 0 for over 13 minutes, with libcuda spin-waiting and
 the GPU idle. Reading the shards into ordinary memory first loaded the same model in 1.4 s. The 4k
