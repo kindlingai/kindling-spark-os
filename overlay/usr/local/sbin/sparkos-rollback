@@ -1,0 +1,63 @@
+#!/bin/bash
+# Roll the box back, in one command, and reboot.
+#
+#   sparkos-rollback [VERSION] [--no-reboot]
+#
+# With no VERSION, DGX OS (GRUB entry 0) becomes the default boot. With VERSION, that installed
+# spark-os image does: as the saved default if it was promoted, or as a one-shot trial if it still
+# carries the trial flag. Either way any queued one-shot boot is cancelled first. GRUB's recordfail
+# flag is cleared, and the box reboots unless --no-reboot is given.
+#
+# The same command works on spark-os and on DGX OS: kindling-setup install puts a copy in both.
+set -euo pipefail
+[ "$(id -u)" = 0 ] || exec sudo -- "$0" "$@"
+
+version= reboot=1
+for arg; do
+	case $arg in
+		--no-reboot) reboot=0 ;;
+		-h|--help) sed -n '2,/^set -euo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
+		-*) echo "sparkos-rollback: unknown option $arg" >&2; exit 2 ;;
+		*) version=$arg ;;
+	esac
+done
+
+# GRUB belongs to DGX OS. From spark-os, reach it through enter-dgx-os; on DGX OS, run it directly.
+if mountpoint -q /run/sparkos/host 2>/dev/null; then
+	root=/run/sparkos/host
+	dgx() { /usr/local/sbin/enter-dgx-os "$@"; }
+else
+	root=
+	dgx() { "$@"; }
+fi
+
+# Check everything before touching GRUB, so a refused rollback changes nothing.
+if [ -n "$version" ]; then
+	[[ $version =~ ^[A-Za-z0-9._-]+$ && $version != *..* ]] || { echo "sparkos-rollback: not a version name: $version" >&2; exit 2; }
+	conf=$root/boot/sparkos/$version/entry.conf
+	[ -f "$conf" ] || { echo "sparkos-rollback: no installed image $version (see kindling-setup list)" >&2; exit 1; }
+	if ! grep -q -- "--id sparkos-$version {" "$root/boot/grub/grub.cfg"; then
+		echo "sparkos-rollback: GRUB has no entry for $version; run update-grub first" >&2
+		exit 1
+	fi
+fi
+
+dgx grub-editenv /boot/grub/grubenv unset next_entry recordfail
+if [ -z "$version" ]; then
+	dgx grub-set-default 0
+	echo "rolling back to DGX OS"
+elif grep -q '^TRIAL=0' "$conf"; then
+	dgx grub-set-default "sparkos-$version"
+	echo "rolling back to spark-os $version as the default boot"
+else
+	# A trial image boots once and reverts unless confirmed, so it never becomes the default here.
+	dgx grub-set-default 0
+	dgx grub-reboot "sparkos-$version"
+	echo "rolling back to spark-os $version as a one-shot trial; DGX OS stays the default"
+fi
+dgx grub-editenv /boot/grub/grubenv list
+
+if [ "$reboot" = 1 ]; then
+	echo "rebooting"
+	systemctl reboot
+fi
