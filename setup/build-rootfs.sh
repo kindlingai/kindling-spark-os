@@ -50,6 +50,9 @@ install -m755 "$K/agent/spark-agent.py" "$stage/opt/spark-agent/"
 install -d "$stage/opt/kindling/dispram"
 cp -a "$K/dispram/." "$stage/opt/kindling/dispram/"
 cp -a "$K/stack/stack.env" "$stage/etc/kindling/stack.env"
+# Port MTUs for sparkos-mtu; no file means leave those ports as DGX OS sets them.
+[ "${CONNECTX_MTU:-0}" -gt 0 ] && echo "$CONNECTX_MTU" > "$stage/etc/kindling/connectx-mtu"
+[ "${ETHERNET_MTU:-0}" -gt 0 ] && echo "$ETHERNET_MTU" > "$stage/etc/kindling/ethernet-mtu"
 if [ "${DISPRAM_VALIDATED:-0}" = 1 ]; then
   echo "DISPRAM_DRIVER=$DRIVER_UPSTREAM" > "$stage/etc/kindling/dispram.env"
 fi

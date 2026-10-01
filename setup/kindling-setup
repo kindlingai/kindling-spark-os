@@ -9,7 +9,7 @@
 #
 # Commands:
 #   install [--flavour F] [--version V] [--site DIR] [--packages "P ..."] [--sources FILE]
-#           [--mounts "DIR ..."] [--hostname-kindling] [--trial]
+#           [--mounts "DIR ..."] [--hostname-kindling] [--connectx-mtu N] [--ethernet-mtu N] [--trial]
 #       Build an image and add it to GRUB. --trial also makes it the next boot, once. DGX OS stays
 #       the default until sparkos-promote is run from a booted image.
 #   build [--flavour F] [--version V] [--site DIR] [--packages "P ..."] [--sources FILE]
@@ -39,6 +39,12 @@
 # /var/log, /var/lib/docker, /var/lib/containerd, /var/lib/spark-watchdog and /var/lib/nfs. Model
 # recipes that keep weights or compose directories in /var/tmp want --mounts /var/tmp. System
 # directories (/, /etc, /usr, /boot, /run, ...) are refused. install creates a missing source.
+#
+# --connectx-mtu N is the RoCE MTU for the ConnectX ports (256 ... 4096, default 4096; 0 turns it
+# off). At boot each ConnectX port whose Ethernet MTU is too small for it is raised to N + 104 (4200
+# for 4096); a larger MTU such as 9000 stays. --ethernet-mtu N sets the onboard Ethernet ports to
+# exactly N; by default they keep DGX OS's setting. Raising an MTU needs the switch or peer to accept
+# the larger frames.
 #
 # --hostname-kindling names the box kindling-XXXX under spark-os (XXXX: the last four hex digits of
 # its LAN port's MAC, as NVIDIA's gx10-XXXX), recorded in /etc/kindling-spark-os/hostname on the DGX
@@ -84,6 +90,7 @@ check_host() {
 }
 
 flavour=nvidia-64k version= site= out= trial=0 packages= sources=() mounts= hostname=
+connectx_mtu=4096 ethernet_mtu=0
 parse() {
   while [ $# -gt 0 ]; do
     case $1 in
@@ -96,6 +103,8 @@ parse() {
       --sources) sources+=("$2"); shift 2 ;;
       --mounts) mounts="$mounts $2"; shift 2 ;;
       --hostname-kindling) hostname=kindling; shift ;;
+      --connectx-mtu) connectx_mtu=$2; shift 2 ;;
+      --ethernet-mtu) ethernet_mtu=$2; shift 2 ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -107,6 +116,9 @@ parse() {
     while [ -e "$host/boot/sparkos/$version" ]; do version=$base-$n; n=$((n + 1)); done
   fi
   [[ $version =~ ^[A-Za-z0-9._-]+$ ]] || die "version may hold only letters, digits, '.', '_' and '-'"
+  case $connectx_mtu in 0|256|512|1024|2048|4096) ;; *) die "--connectx-mtu is a RoCE MTU: 256, 512, 1024, 2048, 4096, or 0 for off" ;; esac
+  [[ $ethernet_mtu =~ ^[0-9]+$ ]] && { [ "$ethernet_mtu" = 0 ] || { [ "$ethernet_mtu" -ge 576 ] && [ "$ethernet_mtu" -le 9978 ]; }; } ||
+    die "--ethernet-mtu is 576 to 9978, or 0 to keep DGX OS's setting"
   local m
   for m in $mounts; do
     [[ $m == /?* && $m != *..* && $m =~ ^[A-Za-z0-9._/-]+$ ]] || die "--mounts needs absolute paths: $m"
@@ -142,8 +154,10 @@ build() {
   [ -n "$packages" ] && echo "extra packages:$packages"
   [ ${#sources[@]} -gt 0 ] && echo "extra apt sources: ${sources[*]}"
   [ -n "$mounts" ] && echo "extra mounts:$mounts"
+  echo "ConnectX RoCE MTU: ${connectx_mtu/#0/off}; Ethernet MTU: ${ethernet_mtu/#0/as DGX OS sets it}"
   OUT=$out VERSION=$version FLAVOUR=$flavour SITE=$site HOST=$host EXTRA_PACKAGES=$packages \
-    EXTRA_SOURCES="${sources[*]}" EXTRA_MOUNTS=$mounts "$K/setup/build-rootfs.sh" ||
+    EXTRA_SOURCES="${sources[*]}" EXTRA_MOUNTS=$mounts CONNECTX_MTU=$connectx_mtu ETHERNET_MTU=$ethernet_mtu \
+    "$K/setup/build-rootfs.sh" ||
     { clean_out; die "build failed"; }
 }
 
@@ -220,7 +234,7 @@ kindling_hostname() {
 }
 
 install_image() {
-  local d=$host/boot/sparkos/$version dir
+  local d=$host/boot/sparkos/$version dir saved
   [ -e "$d" ] && die "$d already exists; pick another --version"
   echo "undo commands below are for DGX OS as root; from spark-os, prefix them with enter-dgx-os"
   install -d "$host/images" "$d"

@@ -102,6 +102,13 @@ Options:
   hex digits of its LAN port's MAC (NVIDIA names boxes `gx10-XXXX` the same way). DGX OS keeps its
   own hostname. It is recorded in `/etc/kindling-spark-os/hostname` on the DGX OS disk; delete that
   file to go back.
+- `--connectx-mtu N`: the RoCE MTU for the ConnectX ports, default 4096 (`0` turns it off). RoCE
+  runs at the largest IB MTU that fits in the Ethernet MTU less 88 bytes, so a port at the usual
+  1500 runs RoCE at 1024. At boot, and whenever a link comes up, a ConnectX port too small for N is
+  raised to N + 104 (4200 for 4096). A larger MTU, such as 9000, is left alone. The switch or peer
+  on that link must accept the larger frames; `setup.sh --check` lists the ports it will raise.
+- `--ethernet-mtu N`: an exact MTU for the onboard Ethernet ports. By default they keep DGX OS's
+  setting.
 - `--site DIR` (below).
 
 `setup.sh` takes the same options. `list` shows the installed images and GRUB's state, and `stack`

@@ -1,0 +1,51 @@
+#!/bin/sh
+# Set the box's port MTUs from what kindling-setup baked into the image.
+#
+#   sparkos-mtu [--dry-run] [IFACE]
+#
+# ConnectX ports (/etc/kindling/connectx-mtu, a RoCE MTU, default 4096): RoCE runs at the largest IB
+# MTU (256 ... 4096) that fits in the Ethernet MTU less 88 bytes of headers (the kernel's
+# iboe_get_mtu), so a 1500-byte port runs RoCE at 1024 and 4096 needs at least 4184. A port below
+# that is raised to the target plus 104 (4200 for 4096, as Mellanox recommends). A larger MTU, such
+# as 9000, is left alone: this only ever raises.
+#
+# The onboard Ethernet ports (/etc/kindling/ethernet-mtu): physical en* ports that are not ConnectX
+# get exactly that MTU.
+#
+# No file, or 0, leaves those ports as DGX OS's network profiles set them. Raising an MTU is only
+# safe when the switch or peer at the other end accepts the larger frames.
+set -u
+connectx=$(cat /etc/kindling/connectx-mtu 2>/dev/null || echo 0)
+ethernet=$(cat /etc/kindling/ethernet-mtu 2>/dev/null || echo 0)
+dry=0
+[ "${1:-}" = --dry-run ] && { dry=1; shift; }
+
+set_mtu() {  # set_mtu IFACE FROM TO WHY
+	if [ "$dry" = 1 ]; then
+		echo "$1: would set MTU $2 to $3 ($4)"
+	elif ip link set dev "$1" mtu "$3"; then
+		echo "$1: set MTU $2 to $3 ($4)"
+	else
+		echo "$1: could not set MTU $2 to $3" >&2
+	fi
+}
+
+for dev in /sys/class/net/en*; do
+	[ -e "$dev/device" ] || continue
+	iface=${dev##*/}
+	[ -n "${1:-}" ] && [ "$iface" != "$1" ] && continue
+	mtu=$(cat "$dev/mtu")
+	if [ "$(basename "$(readlink "$dev/device/driver")")" = mlx5_core ]; then
+		[ "$connectx" -gt 0 ] 2>/dev/null || continue
+		want=$((connectx + 104))
+		if [ "$mtu" -ge "$want" ]; then
+			echo "$iface: MTU $mtu already carries RoCE $connectx"
+		else
+			set_mtu "$iface" "$mtu" "$want" "RoCE $connectx"
+		fi
+	else
+		[ "$ethernet" -gt 0 ] 2>/dev/null || continue
+		[ "$mtu" -eq "$ethernet" ] && continue
+		set_mtu "$iface" "$mtu" "$ethernet" "--ethernet-mtu"
+	fi
+done

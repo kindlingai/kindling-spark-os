@@ -1,0 +1,12 @@
+# Port MTUs from kindling-setup's --connectx-mtu and --ethernet-mtu (see sparkos-mtu). This covers
+# boot; NetworkManager's dispatcher hook covers links that come up later.
+[Unit]
+Description=ConnectX and Ethernet port MTUs
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sparkos-mtu
+
+[Install]
+WantedBy=multi-user.target

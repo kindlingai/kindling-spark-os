@@ -4,6 +4,7 @@
 #
 #   ./setup.sh [--check] [--yes] [--stack STACK] [--flavour nvidia-64k|nvidia] [--site DIR] [--no-trial]
 #              [--packages "P ..."] [--sources FILE] [--mounts "DIR ..."] [--hostname-kindling]
+#              [--connectx-mtu N] [--ethernet-mtu N]
 #
 #   --check     only check the prerequisites; change nothing
 #   --yes       answer yes to both questions (physical access, and building and installing)
@@ -15,6 +16,8 @@
 #   --sources   an apt source on DGX OS to install from, a .list or .sources file (repeatable)
 #   --mounts    more directories to bind from the DGX OS disk, such as /var/tmp
 #   --hostname-kindling  name the box kindling-XXXX under spark-os (XXXX from its LAN MAC)
+#   --connectx-mtu  RoCE MTU for the ConnectX ports (default 4096; 0 off): raises any port too small
+#   --ethernet-mtu  exact MTU for the onboard Ethernet ports (default: as DGX OS sets it)
 #
 # Tailscale, if DGX OS has it:
 #   ./setup.sh --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale
@@ -31,6 +34,7 @@ cd "$(dirname "$0")"
 
 options="$*"
 check_only=0 yes=0 stack= flavour=nvidia-64k site= trial=1 packages= sources=() mounts= hostname_kindling=0
+connectx_mtu=4096 ethernet_mtu=0
 while [ $# -gt 0 ]; do
 	case $1 in
 		--check) check_only=1; shift ;;
@@ -43,6 +47,8 @@ while [ $# -gt 0 ]; do
 		--sources) sources+=("${2#/run/sparkos/host}"); shift 2 ;;
 		--mounts) mounts="$mounts $2"; shift 2 ;;
 		--hostname-kindling) hostname_kindling=1; shift ;;
+		--connectx-mtu) connectx_mtu=$2; shift 2 ;;
+		--ethernet-mtu) ethernet_mtu=$2; shift 2 ;;
 		-h|--help) sed -n '2,/^set -uo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "setup.sh: unknown option $1 (try --help)" >&2; exit 2 ;;
 	esac
@@ -190,6 +196,19 @@ if [ -d "$H/var/lib/tailscale" ] && [[ " $packages " != *" tailscale "* ]]; then
 		"add: ${ts:+--sources ${ts#$H} }--packages tailscale   (the image keeps this box's tailnet identity)"
 fi
 [ "$hostname_kindling" = 1 ] && pass "hostname under spark-os: kindling-XXXX from the LAN MAC"
+# MTUs the image will change at boot. A port that comes up with a larger MTU than its peer or
+# switch allows drops the larger frames, so these are worth a look before the first boot.
+for dev in /sys/class/net/en*; do
+	[ -e "$dev/device" ] && [ "$(cat "$dev/operstate")" = up ] || continue
+	iface=${dev##*/} mtu=$(cat "$dev/mtu")
+	if [ "$(basename "$(readlink "$dev/device/driver")")" = mlx5_core ]; then
+		[ "$connectx_mtu" -gt 0 ] && [ "$mtu" -lt $((connectx_mtu + 104)) ] &&
+			note "ConnectX $iface is up at MTU $mtu, so RoCE runs below $connectx_mtu; the image raises it to $((connectx_mtu + 104))" \
+				"make sure the switch or peer on that link accepts $((connectx_mtu + 104))-byte frames, or pass --connectx-mtu 0"
+	elif [ "$ethernet_mtu" -gt 0 ] && [ "$mtu" != "$ethernet_mtu" ]; then
+		note "Ethernet $iface is up at MTU $mtu; the image sets it to $ethernet_mtu" "make sure the network it is on allows that"
+	fi
+done
 [ -n "$site" ] || { [ -d "$H/etc/kindling-spark-os/site" ] && site=/host/etc/kindling-spark-os/site; }
 [ -n "$site" ] && pass "site layer: ${site#/host}" || pass "no site layer"
 
@@ -247,6 +266,7 @@ args=(install --flavour "$flavour")
 for src in "${sources[@]}"; do args+=(--sources "$src"); done
 [ -n "$mounts" ] && args+=(--mounts "$mounts")
 [ "$hostname_kindling" = 1 ] && args+=(--hostname-kindling)
+args+=(--connectx-mtu "$connectx_mtu" --ethernet-mtu "$ethernet_mtu")
 install_out=$(mktemp)
 $sudo docker run --rm --privileged --network host -v "$host:/host" "$tag" "${args[@]}" | tee "$install_out"
 installed=$(sed -n 's/^installed spark-os //p' "$install_out")
