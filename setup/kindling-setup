@@ -80,6 +80,32 @@ build() {
   OUT=$out VERSION=$version FLAVOUR=$flavour SITE=$site HOST=$host "$K/setup/build-rootfs.sh"
 }
 
+# A swap header records its page size, so a 64k image cannot use DGX OS's /swap.img. This makes a
+# parallel /swap-64k.img on the same disk, once, the size of DGX OS's swap file (16 GiB on the
+# Sparks), formatted for 64 KiB pages whatever kernel runs setup. sparkos-swap turns it on at boot.
+# It is skipped, with a warning, if the disk would keep less than MIN_FREE_GIB (default 32) free.
+parallel_swap() {
+  local page f size=0 spec type free
+  case $flavour in *-64k) page=65536 ;; *) return 0 ;; esac
+  f=$host/swap-64k.img
+  [ -f "$f" ] && return 0
+  while read -r spec _ type _; do
+    if [ "$type" = swap ] && [ "${spec#/}" != "$spec" ] && [ -f "$host$spec" ]; then
+      size=$(stat -c %s "$host$spec"); break
+    fi
+  done < <(grep -v '^[[:space:]]*#' "$host/etc/fstab")
+  [ "$size" -gt 0 ] || size=$((16 << 30))
+  free=$(df -B1 --output=avail "$host" | tail -1)
+  if [ $((free - size)) -lt $((${MIN_FREE_GIB:-32} << 30)) ]; then
+    echo "warning: not making $f: the disk would keep less than ${MIN_FREE_GIB:-32} GiB free; the image will run without swap" >&2
+    return 0
+  fi
+  fallocate -l "$size" "$f"
+  chmod 600 "$f"
+  mkswap -p "$page" "$f" >/dev/null
+  echo "made $f ($((size >> 30)) GiB swap for 64 KiB pages)"
+}
+
 install_image() {
   local d=$host/boot/sparkos/$version
   [ -e "$d" ] && die "$d already exists; pick another --version"
@@ -105,6 +131,7 @@ EOF
   in_host grub-editenv list | grep -q '^saved_entry=' || in_host grub-editenv - set saved_entry=0
   in_host update-grub 2>&1 | grep -E "spark-os|done" || true
   rm -rf "$out"
+  parallel_swap
   echo "installed spark-os $version"
   if [ "$trial" = 1 ]; then
     in_host grub-reboot "sparkos-$version"

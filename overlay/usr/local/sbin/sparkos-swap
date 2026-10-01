@@ -1,0 +1,38 @@
+#!/bin/sh
+# Turn on swap for spark-os from the DGX OS install's root disk: sparkos-swap on|off
+#
+# DGX OS lists its swap in its own /etc/fstab (a 16 GiB /swap.img on the Sparks), which the
+# initramfs leaves mounted at /run/sparkos/host. A swap header records the page size it was made
+# for, so:
+#   4 KiB pages   use DGX OS's swap entries as they are
+#   other sizes   use /swap-<N>k.img beside them, which kindling-setup install makes for a 64k
+#                 image. Rewriting DGX OS's header (swapon --fixpgsz) would leave DGX OS without
+#                 swap.
+set -eu
+host=/run/sparkos/host
+action=${1:?usage: sparkos-swap on|off}
+page=$(getconf PAGESIZE)
+
+if [ "$page" = 4096 ]; then
+	devices=$(grep -v '^[[:space:]]*#' "$host/etc/fstab" | while read -r spec _ type _; do
+		[ "$type" = swap ] || continue
+		case $spec in
+			(UUID=*|LABEL=*|PARTUUID=*|/dev/*) echo "$spec" ;;
+			(/*) echo "$host$spec" ;;
+		esac
+	done)
+else
+	devices=$host/swap-$((page / 1024))k.img
+	if [ ! -f "$devices" ]; then
+		echo "no $devices; run kindling-setup install to make it" >&2
+		exit 0
+	fi
+fi
+
+for d in $devices; do
+	if [ "$action" = on ]; then
+		swapon "$d" && echo "swap on: $d"
+	else
+		swapoff "$d" 2>/dev/null || true
+	fi
+done

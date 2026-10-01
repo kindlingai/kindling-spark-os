@@ -1,0 +1,17 @@
+# Swap from the DGX OS install's disk (see sparkos-swap). Without it, a model load whose
+# peak DGX OS absorbs by swapping cold pages out gets OOM-killed instead.
+[Unit]
+Description=Swap from the DGX OS install
+DefaultDependencies=no
+After=local-fs.target
+Before=swap.target
+ConditionPathIsMountPoint=/run/sparkos/host
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/sparkos-swap on
+ExecStop=/usr/local/sbin/sparkos-swap off
+
+[Install]
+WantedBy=swap.target

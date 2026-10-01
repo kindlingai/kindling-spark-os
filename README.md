@@ -58,6 +58,14 @@ Options: `--flavour nvidia-64k` (default; 64 KiB pages return about 2 GiB on a 1
 THP off so `vm.min_free_kbytes` does not grow to 5% of RAM) or `nvidia`; `--version NAME`; `--site DIR` (below). `list` shows the installed images and GRUB's
 state, `stack` the pair this setup image carries.
 
+### Swap
+
+spark-os uses the DGX OS disk's swap: DGX OS makes a 16 GiB `/swap.img`, and without swap a model
+load whose peak DGX OS absorbs gets OOM-killed. A swap header records its page size, so a 64k image
+cannot use `/swap.img`. For a 64k image, `install` makes a parallel `/swap-64k.img` of the same size
+on that disk, once. It skips this with a warning if less than 32 GiB would stay free
+(`MIN_FREE_GIB`). At boot, `sparkos-swap` turns on whichever file matches the running page size.
+
 ### Trial and promote
 
 A new image boots in trial mode: `sparkos.trial panic=10` on the cmdline. A failed mount panics and
