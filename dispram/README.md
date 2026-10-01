@@ -41,6 +41,11 @@ The method depends on RM internals, so `dispramd` runs only on the driver releas
   across both seams.
 - A 3 GiB tensor with a 2042 MiB carveout tail, built in an unprivileged container through
   dispramd, passed a pattern check.
+- vLLM (nightly ddd6fbca, dots-ocr, the plugin) with a 1 GiB KV budget built a 2.99 GiB,
+  112,128-token cache, 1.99 GiB of it in the carveout. A 1 GiB budget alone could not start at
+  65,536 tokens. Against a baseline with the same 2.99 GiB in ordinary memory, 10 greedy completions
+  (9 to 14,041 prompt tokens, sent one at a time) were identical. The KV layout was layer-major,
+  so every request used the carveout for its last layers.
 
 ## vLLM
 
