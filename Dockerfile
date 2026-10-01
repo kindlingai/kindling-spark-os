@@ -6,8 +6,8 @@
 
 # Every outside input is pinned: mentat by image digest (the multi-arch index, so it holds on any
 # build host), open-gpu-kernel-modules by commit (stacks.yaml), py-spy by wheel hash. A tag can be moved; these cannot. The tags are there for readers.
-ARG MENTATD_IMAGE=mmastrac/mentatd:0.17.1@sha256:17699b38704a12084e667558872289d0911da1fc92ab7e15d7b9e98cd8ca77a7
-ARG MENTAT_ARTIFACTS_IMAGE=mmastrac/mentat-artifacts:0.17.1@sha256:50fa4f9eed45706bf492d1f065e5dcc7fe91eeb9060e952e64fab1b85a015f40
+ARG MENTATD_IMAGE=mmastrac/mentatd:0.18.0@sha256:f42bc5d1a2802ac5c1361c492ed27a0fe753e089ebc8657ddb6e5bc937f6d5f2
+ARG MENTAT_ARTIFACTS_IMAGE=mmastrac/mentat-artifacts:0.18.0@sha256:7e317d0ed99cd9682da9176cf4bc3afeeb425b1fdf3b254f3c80be16dc0edd0c
 FROM ${MENTATD_IMAGE} AS mentatd
 FROM ${MENTAT_ARTIFACTS_IMAGE} AS mentat
 
