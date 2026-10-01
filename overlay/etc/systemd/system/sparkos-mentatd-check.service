@@ -1,0 +1,9 @@
+# Started by NetworkManager's dispatcher on network changes (50-kindling-network). A start while a
+# check runs joins that check, so a burst of events runs one or two checks.
+[Unit]
+Description=Restart mentatd if it has stopped answering
+After=mentatd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sparkos-mentatd-check

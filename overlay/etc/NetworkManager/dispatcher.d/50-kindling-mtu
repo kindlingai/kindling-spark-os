@@ -1,6 +1,0 @@
-#!/bin/sh
-# When a link comes up, or NetworkManager reapplies a profile with another MTU, set it again from
-# kindling-setup's --connectx-mtu and --ethernet-mtu. sparkos-mtu skips ports neither covers.
-case $2 in
-	up|reapply) exec /usr/local/sbin/sparkos-mtu "$1" ;;
-esac

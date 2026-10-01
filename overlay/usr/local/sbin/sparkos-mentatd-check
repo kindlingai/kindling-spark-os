@@ -1,0 +1,23 @@
+#!/bin/bash
+# Restart mentatd if it runs but has stopped answering, and start it at once if it is waiting out
+# its restart backoff (up to 60 s), which a network change may have made pointless. A daemon that
+# answers is never restarted: restarting the daemon on a model group's head box kills the group.
+set -u
+state=$(systemctl show -p ActiveState --value mentatd)
+sub=$(systemctl show -p SubState --value mentatd)
+if [ "$sub" = auto-restart ]; then
+	echo "mentatd is waiting to restart; starting it now"
+	exec systemctl restart mentatd
+fi
+[ "$state" = active ] || exit 0
+# A daemon that started moments ago may not be listening yet.
+since=$(systemctl show -p ActiveEnterTimestampMonotonic --value mentatd)
+now=$(cut -d' ' -f1 /proc/uptime | tr -d .)0000
+[ $(( (now - since) / 1000000 )) -ge 30 ] || exit 0
+# Two misses five seconds apart, so one slow reply does not count.
+for try in 1 2; do
+	curl -sf -m 5 -o /dev/null http://127.0.0.1:6380/healthz && exit 0
+	[ "$try" = 1 ] && sleep 5
+done
+echo "mentatd runs but has not answered /healthz twice; restarting it"
+exec systemctl restart mentatd
