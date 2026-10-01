@@ -5,8 +5,7 @@
 #   tools/build-image.sh [STACK]
 
 # Every outside input is pinned: mentat by image digest (the multi-arch index, so it holds on any
-# build host), open-gpu-kernel-modules by commit (stacks.yaml), spark-agent by commit, py-spy by
-# wheel hash. A tag can be moved; these cannot. The tags are there for readers.
+# build host), open-gpu-kernel-modules by commit (stacks.yaml), py-spy by wheel hash. A tag can be moved; these cannot. The tags are there for readers.
 ARG MENTATD_IMAGE=mmastrac/mentatd:0.17.1@sha256:17699b38704a12084e667558872289d0911da1fc92ab7e15d7b9e98cd8ca77a7
 ARG MENTAT_ARTIFACTS_IMAGE=mmastrac/mentat-artifacts:0.17.1@sha256:50fa4f9eed45706bf492d1f065e5dcc7fe91eeb9060e952e64fab1b85a015f40
 FROM ${MENTATD_IMAGE} AS mentatd
@@ -39,11 +38,8 @@ RUN . /stack.env \
     && gcc -O2 -Wall -Werror -shared -fPIC /src/rmlist.c -o /out/librmlist.so \
          -I/ogkm/src/common/sdk/nvidia/inc -I/ogkm/kernel-open/common/inc \
          -I/ogkm/src/nvidia/arch/nvalloc/unix/include
-# The spark agent, and the two things it needs beyond the stdlib: py-spy, and mentat's ray shim for
+# The two things the spark agent (agent/) needs beyond the stdlib: py-spy, and mentat's ray shim for
 # ray.register. The shim installs as `ray`, so --no-deps keeps real ray out.
-ARG SPARK_AGENT_REF=8ee80bf4b4584d548235bfe23b1ddfecfa0c361d
-RUN git clone -q https://github.com/mmastrac/spark-agent.git /spark-agent \
-    && git -C /spark-agent checkout -q "$SPARK_AGENT_REF"
 COPY --from=mentat /out/ /mentat-out/
 ARG PY_SPY_VERSION=0.4.2
 ARG PY_SPY_SHA256=142887e984a4e541071c99a4401ff8c3770f255d329dbd0f64e8c1dd51882cce
@@ -64,7 +60,7 @@ COPY --from=stack /stack /opt/kindling/stack
 COPY --from=mentatd /usr/local/bin/mentatd /usr/local/bin/mentatd-probe-machine /opt/kindling/mentatd/
 COPY --from=build /out/librmlist.so /opt/kindling/dispram/
 COPY --from=build /out/agent-lib /opt/kindling/agent/lib
-COPY --from=build /spark-agent/agent/spark-agent.py /spark-agent/agent/spark-memory.py /opt/kindling/agent/
+COPY agent/spark-agent.py agent/spark-memory.py /opt/kindling/agent/
 COPY dispram/dispramd.py dispram/LICENSE dispram/LICENSE-GPL dispram/BUNDLING-EXCEPTION dispram/README.md /opt/kindling/dispram/
 COPY dispram/python /opt/kindling/dispram/python
 COPY dispram/vllm /opt/kindling/dispram/vllm

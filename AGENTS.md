@@ -24,7 +24,7 @@ lends the GB10's unused 2 GiB display carveout to CUDA.
 | Path | What |
 |---|---|
 | `setup.sh` | The entry point for people: checks the box, asks two questions, builds the setup image, installs a trial image. Logs every change with its undo. |
-| `Dockerfile` | The setup image. Stages: `stack` (fetches and checks the pair's .debs), `build` (librmlist.so, spark-agent, py-spy), final (Ubuntu + mmdebstrap + everything under `/opt/kindling`). |
+| `Dockerfile` | The setup image. Stages: `stack` (fetches and checks the pair's .debs), `build` (librmlist.so, py-spy and mentat's ray shim for the agent), final (Ubuntu + mmdebstrap + everything under `/opt/kindling`). |
 | `tools/build-image.sh` | Builds and tags the setup image for one stack. Re-runs itself under sudo when Docker needs it. |
 | `tools/fetch-stack.py` | Runs in the `stack` stage: downloads the pair's .debs, checks sha256, writes `stack.env`. |
 | `tools/pin-stack.sh` | Prints a new `stacks.yaml` entry for a kernel ABI and driver version, resolved against Ubuntu ports only. |
@@ -36,6 +36,7 @@ lends the GB10's unused 2 GiB display carveout to CUDA.
 | `setup/packages.txt` | Packages in every image. The kernel and driver lines are placeholders the stack fills in. |
 | `setup/42_sparkos` | GRUB script installed into the DGX OS root's `/etc/grub.d`. One menu entry per installed image. |
 | `overlay/` | Files copied over the root as-is: units, scripts, the initramfs hook, Docker config. |
+| `agent/` | The spark host agent (status page and MCP tools on :8090) and `spark-memory.py`. Has its own README. |
 | `dispram/` | The carveout lender (AGPL server, GPL+exception client and vLLM plugin). Has its own README and licences. |
 | `docs/` | README assets. |
 
@@ -185,7 +186,7 @@ After a trial boot, check at least:
 ## Pinning
 
 Everything the setup image pulls is pinned: the stack's .debs by sha256, mentatd and its artifacts
-by image digest, spark-agent by commit, py-spy by version and hash, open-gpu-kernel-modules by
+by image digest, py-spy by version and hash, open-gpu-kernel-modules by
 commit. Keep it that way. A new upstream version is a deliberate change with its own commit.
 
 ## Things that have already gone wrong

@@ -27,7 +27,7 @@ The image carries:
   Boot keeps working
 - Docker and the NVIDIA container toolkit, RDMA and ConnectX tools, NVIDIA's DGX tuning packages
 - `mentatd`, the [mentat](https://github.com/mmastrac/mentat) node daemon
-- the [spark agent](https://github.com/mmastrac/spark-agent), which registers its MCP endpoint
+- the [spark agent](agent/), which registers its MCP endpoint
   with mentat
 - `dispramd`, which lends the GPU's 2 GiB display carveout to CUDA (see [dispram](#dispram))
 - `spark-watchdog`, a host log snapshot for the agent, and a cluster status console on tty1

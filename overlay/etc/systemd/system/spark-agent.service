@@ -1,4 +1,4 @@
-# The spark agent (github.com/mmastrac/spark-agent): node status page and MCP tools on :8090,
+# The spark agent (agent/ in kindling-spark-os): node status page and MCP tools on :8090,
 # registered with the local mentatd as group agent-<hostname>.
 #
 # It observes and never changes the host. CAP_SYS_PTRACE is the one capability it holds, so py-spy
