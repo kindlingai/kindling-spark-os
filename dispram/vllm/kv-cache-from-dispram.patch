@@ -1,3 +1,12 @@
+kv-cache-from-dispram.patch: put vLLM's KV cache tail in the GB10 display carveout (dispram).
+
+SPDX-License-Identifier: AGPL-3.0-or-later OR CC0-1.0
+This patch is yours under either license: AGPL-3.0-or-later (../LICENSE) or CC0-1.0
+(../LICENSE-CC0). If you use it, please credit dispram from kindlingai/kindling-spark-os. Under CC0
+that is a request, not a condition.
+
+Targets vLLM ddd6fbca. Apply with: patch -p1 -d <site-packages> < kv-cache-from-dispram.patch
+
 diff --git a/vllm/v1/worker/gpu_worker.py b/vllm/v1/worker/gpu_worker.py
 --- a/vllm/v1/worker/gpu_worker.py
 +++ b/vllm/v1/worker/gpu_worker.py

@@ -78,4 +78,10 @@ independent rediscovery.
 
 ## License
 
-AGPL-3.0 (`LICENSE`). `rmlist.c` includes NVIDIA's open-gpu-kernel-modules headers, which are MIT.
+dispram is AGPL-3.0 (`LICENSE`), with one exception: the vLLM integration, `vllm/kv-cache-from-dispram.patch`
+and `python/dispram_vllm.py`, is yours under either AGPL-3.0-or-later or CC0-1.0 (`LICENSE-CC0`),
+so it can go into vLLM or anywhere else. If you use it, please credit dispram from
+kindlingai/kindling-spark-os. Under CC0 that is a request, not a condition. Both files import the
+`dispram` client in `python/dispram.py`, which stays AGPL-3.0.
+
+`rmlist.c` includes NVIDIA's open-gpu-kernel-modules headers, which are MIT.
