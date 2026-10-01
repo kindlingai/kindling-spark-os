@@ -8,8 +8,11 @@
 Description=mentat node daemon
 After=network.target NetworkManager.service
 ConditionPathExists=/etc/spark/node.env
-# No start limit: if MENTAT_NODE_IP sits on a fabric port that comes up late (ConnectX hotplug), the
-# default 5 starts in 10 s would leave mentatd stopped for good. It retries every 2 s instead.
+# mentatd binds MENTAT_NODE_IP, the LAN address on every box, and announces whichever
+# MENTAT_ANNOUNCE_IFACES interfaces are up at the time. A box with no ConnectX cable (the card then
+# leaves the PCI bus) still starts, announcing the LAN alone. It starts early rather than after
+# network-online.target, which waits for the fabric ports too. If the LAN address is not there yet,
+# it keeps retrying with no start limit, backing off from 2 s to 60 s.
 StartLimitIntervalSec=0
 
 [Service]
@@ -17,6 +20,8 @@ EnvironmentFile=/etc/spark/node.env
 ExecStart=/usr/local/bin/mentatd daemon
 Restart=always
 RestartSec=2
+RestartSteps=10
+RestartMaxDelaySec=60
 
 [Install]
 WantedBy=multi-user.target
