@@ -14,9 +14,11 @@ The image is an erofs file on the box's own root disk. At boot the initramfs mou
 overlay, copies the box's identity in (hostname, machine-id, ssh host keys, network config,
 `/etc/spark`), and binds `/home`, `/srv`, `/var/tmp`, `/var/log`, `/var/lib/docker`,
 `/var/lib/containerd`, `/var/lib/spark-watchdog` and `/var/lib/nfs` from the root disk. At boot,
-`sparkos-users` copies in the DGX OS install's login users (uid 1000 and up), their group
-memberships and its `/etc/sudoers.d`, so whoever logs in to DGX OS logs in here too. The image's own
-`admin` is only a fallback. Every boot starts from the same
+`sparkos-users` copies in the DGX OS install's login users (uid 1000 and up) and its
+`/etc/sudoers.d`, so whoever logs in to DGX OS logs in here too, with the same password and keys.
+Each user gets exactly its DGX OS group memberships, so the same rights, and a shell the image lacks
+becomes `/bin/bash`. The image's own `admin` is only a fallback, dropped when DGX OS supplies its own
+users. `/etc/subuid` and `/etc/subgid` are not copied. Every boot starts from the same
 image. DGX OS stays installed as the rescue system and owns GRUB.
 
 The image carries:
@@ -29,6 +31,30 @@ The image carries:
   with mentat
 - `dispramd`, which lends the GPU's 2 GiB display carveout to CUDA (see [dispram](#dispram))
 - `spark-watchdog`, a host log snapshot for the agent, and a cluster status console on tty1
+
+## Quick start
+
+On the box, from DGX OS, in a checkout or unpacked download of this repository:
+
+    ./setup.sh --check    # what is missing, changing nothing
+    ./setup.sh            # build the setup image and install a trial image
+    sudo systemctl reboot
+
+`setup.sh` checks the box first: an arm64 GB10, UEFI boot, DGX OS (or a running spark-os), GRUB,
+NVIDIA's apt keyrings, sudo, Docker, disk space, and the package and image hosts. It also warns
+about what the new image will need at boot: a DGX OS user with an ssh key, `/etc/spark` settings,
+and containers that would take the same ports. Before it changes anything, it asks whether you have
+physical access to the box: a failed boot can need its HDMI output, a USB keyboard or a power cycle.
+Then it builds the setup image and runs `kindling-setup install --trial`. It never reboots by
+itself.
+
+Every run is appended to `~/kindling-spark-os-setup.log`: the checks, your answers, and each change
+to the box as a `change:` line with an `undo:` line beneath it, so a person or an agent can reverse
+exactly what a run did. A file it overwrites is first copied to
+`/var/lib/kindling-spark-os/backup/<time>/`.
+
+After the reboot, check the box, then run `sparkos-promote` within 10 minutes to keep the image.
+Otherwise it goes back to DGX OS on its own. `sparkos-rollback` goes back at any time.
 
 ## Supported stacks
 
