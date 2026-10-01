@@ -4,7 +4,7 @@
 #
 #   ./setup.sh [--check] [--yes] [--stack STACK] [--flavour nvidia-64k|nvidia] [--site DIR] [--no-trial]
 #              [--packages "P ..."] [--sources FILE] [--mounts "DIR ..."] [--hostname-kindling]
-#              [--connectx-mtu N] [--ethernet-mtu N]
+#              [--connectx-mtu N] [--ethernet-mtu N] [--secret KEY]
 #
 #   --check     only check the prerequisites; change nothing
 #   --yes       answer yes to both questions (physical access, and building and installing)
@@ -18,6 +18,8 @@
 #   --hostname-kindling  name the box kindling-XXXX under spark-os (XXXX from its LAN MAC)
 #   --connectx-mtu  RoCE MTU for the ConnectX ports (default 4096; 0 off): raises any port too small
 #   --ethernet-mtu  exact MTU for the onboard Ethernet ports (default: as DGX OS sets it)
+#   --secret    mentat's cluster key, the same on every box; required when the box has none. Make one
+#               for a new cluster with: openssl rand -hex 32
 #
 # Tailscale, if DGX OS has it:
 #   ./setup.sh --sources /etc/apt/sources.list.d/tailscale.list --packages tailscale
@@ -32,9 +34,10 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
-options="$*"
+# The options as the log shows them, with the key hidden.
+options=$(printf '%s\n' "$@" | sed '/^--secret$/{n;s/.*/<hidden>/;}' | xargs)
 check_only=0 yes=0 stack= flavour=nvidia-64k site= trial=1 packages= sources=() mounts= hostname_kindling=0
-connectx_mtu=4096 ethernet_mtu=0
+connectx_mtu=4096 ethernet_mtu=0 secret=
 while [ $# -gt 0 ]; do
 	case $1 in
 		--check) check_only=1; shift ;;
@@ -49,6 +52,7 @@ while [ $# -gt 0 ]; do
 		--hostname-kindling) hostname_kindling=1; shift ;;
 		--connectx-mtu) connectx_mtu=$2; shift 2 ;;
 		--ethernet-mtu) ethernet_mtu=$2; shift 2 ;;
+		--secret) secret=$2; shift 2 ;;
 		-h|--help) sed -n '2,/^set -uo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "setup.sh: unknown option $1 (try --help)" >&2; exit 2 ;;
 	esac
@@ -171,8 +175,32 @@ if [ -n "$keyed" ]; then
 else
 	note "no DGX OS user has ~/.ssh/authorized_keys" "add your key first, or the trial boot will have no ssh and revert to DGX OS"
 fi
-[ -f "$H/etc/spark/node.env" ] && pass "/etc/spark/node.env" ||
-	note "no /etc/spark/node.env, so mentatd will not start" "see README, Per-node settings"
+# mentat's key signs every announcement, so a box with no key, or a different one, never joins the
+# cluster. mentat trims whitespace around the key. The comparison here drops all whitespace, which
+# gives the same answer for any key without spaces inside it.
+node_env=$H/etc/spark/node.env key_file= key=
+if $sudo test -f "$node_env"; then
+	key_file=$($sudo sed -n 's/^[[:space:]]*MENTAT_SECRET_FILE=//p' "$node_env" | tail -1 | tr -d \'\")
+	if [ -n "$key_file" ]; then
+		key=$($sudo cat "$H$key_file" 2>/dev/null | tr -d '[:space:]')
+	else
+		key=$($sudo sed -n 's/^[[:space:]]*MENTAT_SECRET=//p' "$node_env" | tail -1 | tr -d "[:space:]'\"")
+	fi
+fi
+if [ -n "$key_file" ] && [ -z "$key" ]; then
+	fail "node.env names MENTAT_SECRET_FILE=$key_file, which is missing or empty, so mentatd will not start" \
+		"put the cluster's key in $key_file"
+elif [ -n "$key" ] && [ -n "$secret" ] && [ "$key" != "$(printf %s "$secret" | tr -d '[:space:]')" ]; then
+	fail "--secret differs from the key this box already has (${key_file:-MENTAT_SECRET in node.env})" \
+		"every box in a cluster needs the same key: drop --secret, or replace the existing key first"
+elif [ -n "$key" ]; then
+	pass "mentat key: ${key_file:-MENTAT_SECRET in node.env}"
+elif [ -n "$(printf %s "$secret" | tr -d '[:space:]')" ]; then
+	pass "mentat key: --secret, written to /etc/spark/mentat.key"
+else
+	fail "no mentat key, so this box cannot join a mentat cluster" \
+		"pass --secret KEY with the same key on every box; make one for a new cluster with: openssl rand -hex 32"
+fi
 [ -f "$H/etc/spark/agent.env" ] && pass "/etc/spark/agent.env" ||
 	note "no /etc/spark/agent.env, so the spark agent will not start" "see README, Per-node settings"
 if [ "$docker_ok" = 1 ]; then
@@ -260,6 +288,21 @@ fi
 
 set -e
 echo
+if [ -z "$key" ] && [ -n "$secret" ]; then
+	$sudo install -d -m755 "$H/etc/spark"
+	printf '%s\n' "$secret" | $sudo install -m400 /dev/stdin "$H/etc/spark/mentat.key"
+	echo "change: wrote mentat's key to /etc/spark/mentat.key"
+	echo "  undo: sudo rm /etc/spark/mentat.key"
+	if $sudo test -f "$node_env"; then
+		echo 'MENTAT_SECRET_FILE=/etc/spark/mentat.key' | $sudo tee -a "$node_env" >/dev/null
+		echo "change: added MENTAT_SECRET_FILE=/etc/spark/mentat.key to /etc/spark/node.env"
+		echo "  undo: sudo sed -i '/^MENTAT_SECRET_FILE=\/etc\/spark\/mentat.key$/d' /etc/spark/node.env"
+	else
+		echo 'MENTAT_SECRET_FILE=/etc/spark/mentat.key' | $sudo install -m600 /dev/stdin "$node_env"
+		echo "change: wrote /etc/spark/node.env with MENTAT_SECRET_FILE=/etc/spark/mentat.key"
+		echo "  undo: sudo rm /etc/spark/node.env"
+	fi
+fi
 echo "building the setup image (a few minutes the first time)..."
 build_log=$(mktemp /tmp/kindling-setup-build.XXXXXX.log)
 $sudo tools/build-image.sh "$stack" > "$build_log" 2>&1 || {

@@ -36,9 +36,13 @@ The image carries:
 
 On the box, from DGX OS, in a checkout or unpacked download of this repository:
 
-    ./setup.sh --check    # what is missing, changing nothing
-    ./setup.sh            # build the setup image and install a trial image
+    ./setup.sh --check              # what is missing, changing nothing
+    ./setup.sh --secret CLUSTER_KEY  # build the setup image and install a trial image
     sudo systemctl reboot
+
+`CLUSTER_KEY` is mentat's key, and every box in a cluster needs the same one. Make one for a new
+cluster with `openssl rand -hex 32`, and pass it to `setup.sh` on each box. A box that already has
+a key in `/etc/spark/node.env` needs no `--secret`.
 
 `setup.sh` checks the box first: an arm64 GB10, UEFI boot, DGX OS (or a running spark-os), GRUB,
 NVIDIA's apt keyrings, sudo, Docker, disk space, and the package and image hosts. It also warns
@@ -176,7 +180,9 @@ mount namespace. Use it for anything the image leaves out: apt, update-grub, gru
 These live in `/etc/spark` on each box's own disk, and the initramfs copies them in:
 
 - `node.env` for `mentatd`: `MENTAT_NODE_IP`, `MENTAT_PEERS`, `MENTAT_ANNOUNCE_IFACES`,
-  `MENTAT_SECRET_FILE`. Without it `mentatd` does not start.
+  `MENTAT_SECRET_FILE`. Without it `mentatd` does not start. `setup.sh --secret` writes one with the
+  key alone, which is enough: `mentatd` then uses the address of the default route, and finds the
+  other boxes by their broadcasts on the same network.
 - `agent.env` for the spark agent: `MENTAT_ROUTER_URL` and `ALLOWED_SOURCES`. Without it the agent
   does not start.
 
