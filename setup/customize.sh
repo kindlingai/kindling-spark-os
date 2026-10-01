@@ -18,8 +18,11 @@ useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nolo
 
 # Persistent state stays on the box's own root disk, which the initramfs leaves at
 # /run/sparkos/host. /var/log too, so the journal survives a reboot instead of filling the RAM
-# overlay. A site layer adds its own binds the same way.
-for d in home var/log var/lib/docker var/lib/containerd; do
+# overlay. spark-watchdog's reset log must outlive the reset it records, or its "two resets in an
+# hour means stop" guard never fires. /var/lib/nfs holds the NFS server's export and lock-recovery
+# state. kindling-setup install creates any source directory DGX OS lacks. A site layer adds its
+# own binds the same way.
+for d in home var/log var/lib/docker var/lib/containerd var/lib/spark-watchdog var/lib/nfs; do
   mkdir -p "/$d"
   echo "/run/sparkos/host/$d /$d none bind,nofail 0 0" >> /etc/fstab
 done

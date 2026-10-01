@@ -8,9 +8,9 @@ by making use of GPU RAM that normally goes unused.
 
 The image is an erofs file on the box's own root disk. At boot the initramfs mounts it under a RAM
 overlay, copies the box's identity in (hostname, machine-id, ssh host keys, network config,
-`/etc/spark`), and binds `/home`, `/var/log`, `/var/lib/docker` and `/var/lib/containerd` from
-the root disk. Every boot starts from the same image. DGX OS stays installed as the rescue system
-and owns GRUB.
+`/etc/spark`), and binds `/home`, `/var/log`, `/var/lib/docker`, `/var/lib/containerd`,
+`/var/lib/spark-watchdog` and `/var/lib/nfs` from the root disk. Every boot starts from the same
+image. DGX OS stays installed as the rescue system and owns GRUB.
 
 The image carries:
 

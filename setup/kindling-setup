@@ -131,6 +131,8 @@ install_image() {
   local d=$host/boot/sparkos/$version
   [ -e "$d" ] && die "$d already exists; pick another --version"
   install -d "$host/images" "$d"
+  # Sources for the image's bind mounts (setup/customize.sh) that DGX OS may not have made.
+  install -d "$host/var/lib/spark-watchdog" "$host/var/lib/nfs"
   install -m644 "$out/spark-os.erofs" "$host/images/spark-os-$version.erofs"
   install -m644 "$out/vmlinuz" "$d/vmlinuz"
   install -m644 "$out/initrd.img" "$d/initrd.img"
