@@ -236,6 +236,13 @@ kindling_hostname() {
 install_image() {
   local d=$host/boot/sparkos/$version dir saved
   [ -e "$d" ] && die "$d already exists; pick another --version"
+  # The fallback to DGX OS after a failed boot matches spark-os entries by id, so a default saved as
+  # a menu index (grub-set-default 2) would escape it. 0 is DGX OS itself.
+  saved=$(in_host grub-editenv list | sed -n 's/^saved_entry=//p')
+  index='^[0-9>]+$'
+  if [[ $saved =~ $index && $saved != 0 ]]; then
+    die "GRUB's saved default is the menu index $saved; set it by id or to DGX OS first: grub-set-default 0"
+  fi
   echo "undo commands below are for DGX OS as root; from spark-os, prefix them with enter-dgx-os"
   install -d "$host/images" "$d"
   install -m644 "$out/spark-os.erofs" "$host/images/spark-os-$version.erofs"

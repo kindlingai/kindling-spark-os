@@ -98,6 +98,14 @@ else
 fi
 H=${host%/}
 [ -d "$H/boot/grub" ] && pass "GRUB on the DGX OS root" || fail "no $H/boot/grub" "DGX OS must boot with GRUB"
+saved=$(grep -a '^saved_entry=' "$H/boot/grub/grubenv" 2>/dev/null | cut -d= -f2)
+index='^[0-9>]+$'
+if [[ $saved =~ $index && $saved != 0 ]]; then
+	fail "GRUB's saved default is the menu index $saved; spark-os's fallback to DGX OS needs an id" \
+		"$([ "$host" = / ] && echo sudo || echo enter-dgx-os) grub-set-default 0"
+else
+	pass "GRUB default: ${saved:-the first entry}"
+fi
 keys_ok=1
 for k in dgx_debian_prod.gpg cuda_debian_prod.gpg; do [ -f "$H/usr/share/keyrings/$k" ] || keys_ok=0; done
 [ "$keys_ok" = 1 ] && pass "NVIDIA apt keyrings" ||
