@@ -3,7 +3,7 @@
 # NVIDIA's repository with the box's own apt keyring.
 #
 #   tools/build-image.sh [STACK]
-ARG MENTAT_VERSION=0.17.0
+ARG MENTAT_VERSION=0.17.1
 FROM mmastrac/mentatd:${MENTAT_VERSION} AS mentatd
 FROM mmastrac/mentat-artifacts:${MENTAT_VERSION} AS mentat
 
