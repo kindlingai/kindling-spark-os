@@ -44,6 +44,10 @@ systemctl mask getty@tty1.service autovt@tty1.service
 rm /usr/sbin/update-initramfs
 dpkg-divert --local --rename --remove /usr/sbin/update-initramfs >/dev/null
 
+# openssh's postinst generated host keys here. Every image file would carry the same private keys.
+# The initramfs copies in the box's own, and ssh.service makes new ones if a box has none.
+rm -f /etc/ssh/ssh_host_*
+
 echo "C.UTF-8 UTF-8" > /etc/locale.gen
 ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 rm -rf /var/log/*.log
