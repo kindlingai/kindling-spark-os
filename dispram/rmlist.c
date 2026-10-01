@@ -79,6 +79,8 @@ int rm_display_frm(unsigned long long *base, unsigned long long *size)
     return -1;
 }
 
+int rm_free(unsigned int handle);
+
 // Opens an RM client with a device and subdevice. Returns 0 on success.
 int rm_open(void)
 {
@@ -122,15 +124,26 @@ int rm_export_range_h(unsigned long long base, unsigned long long size, unsigned
     };
     CHECK(rm_alloc(device, list, NV01_MEMORY_LIST_SYSTEM, &p, sizeof p, &st_), "alloc memory list");
 
+    // On failure past this point, free the list object too: the caller returns the range to its free
+    // list, and an object left behind would still cover memory that is then lent again.
     int fd = open("/dev/nvidiactl", O_RDWR | O_CLOEXEC);
-    if (fd < 0)
+    if (fd < 0) {
+        rm_free(list);
         return -1;
+    }
     NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TO_FD_PARAMS e = {
         .object = {.type = NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE_RM,
                    .data.rmObject = {.hDevice = device, .hParent = device, .hObject = list}},
         .fd = fd,
     };
-    CHECK(rm_control(client, NV0000_CTRL_CMD_OS_UNIX_EXPORT_OBJECT_TO_FD, &e, sizeof e, &st_), "export to fd");
+    NvU32 st = 0;
+    int rc = rm_control(client, NV0000_CTRL_CMD_OS_UNIX_EXPORT_OBJECT_TO_FD, &e, sizeof e, &st);
+    if (rc || st) {
+        fprintf(stderr, "export to fd: ioctl %d status 0x%x\n", rc, st);
+        close(fd);
+        rm_free(list);
+        return -1;
+    }
     return fd;
 }
 

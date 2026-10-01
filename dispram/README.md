@@ -22,9 +22,12 @@ RMR), and the kernel keeps it out of system RAM. The firmware offers no setting 
 - `rmlist.c` (built as `librmlist.so`) holds the RM calls. It compiles against
   [open-gpu-kernel-modules](https://github.com/NVIDIA/open-gpu-kernel-modules) at the driver's
   exact tag, because those structures change between releases.
-- `python/dispram.py` is the client. `glued_zeros(nbytes, device)` maps one virtual range with the
-  CUDA VMM API: ordinary device memory (`cuMemCreate`) in front, and the carveout slice
-  (`cuMemImportFromShareableHandle`) behind it. It returns that range as a zeroed int8 tensor.
+- `python/dispram.py` is the client. `reserve_bytes()` claims the largest free slice while a
+  process sizes its memory, so two processes sizing at once never count the same carveout.
+  `glued_zeros(nbytes, device)` then maps one virtual range with the CUDA VMM API: ordinary device
+  memory (`cuMemCreate`) in front, and the claimed slice (`cuMemImportFromShareableHandle`) behind
+  it. It returns that range as a zeroed int8 tensor. A claim larger than the buffer is mapped whole.
+  If dispramd is not answering, both act as if dispram were absent.
 
 Each request carries `"key": "kindlingai_1"`. Slices are 2 MiB granular, and they are freed when
 the client closes its socket, normally at process exit.
