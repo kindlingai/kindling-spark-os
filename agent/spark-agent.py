@@ -701,8 +701,9 @@ TOOLS = {
                       "processes through the host's /proc.",
                       {"rounds": {"type": "integer"},
                        "gap_s": {"type": "number"}}),
-    "models": (t_models, "mentat-serve's table of every group and model, "
-               "with the token load this agent scraped from each engine.", {}),
+    "models": (t_models, "mentat's table of every group, model and node, read "
+               "from the mesh head, with the token load this agent scraped "
+               "from each engine.", {}),
 }
 
 
