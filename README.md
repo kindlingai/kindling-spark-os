@@ -41,35 +41,24 @@ The image carries:
 
 On the box, from DGX OS:
 
-    git clone --branch stable https://github.com/kindlingai/kindling-spark-os.git && kindling-spark-os/setup.sh --secret CLUSTER_KEY
+    git clone --branch stable https://github.com/kindlingai/kindling-spark-os.git
+    kindling-spark-os/setup.sh --secret CLUSTER_KEY
 
-Then `sudo systemctl reboot`. `kindling-spark-os/setup.sh --check` lists anything missing and changes
-nothing. `setup.sh` runs from any directory.
+Then `sudo systemctl reboot`. You can run `kindling-spark-os/setup.sh --check` to do a pre-check
+on your system without installing.
 
-`stable` is a tag on the newest release that has run on a fleet. Leave `--branch` out for `main`, or
-name a release such as `v0.9.2`. In an existing clone, `git fetch --tags --force && git checkout
-stable` moves to the current stable release.
-
-`CLUSTER_KEY` is mentat's key, and every box in a cluster needs the same one. Make one for a new
-cluster with `openssl rand -hex 32`, and pass it to `setup.sh` on each box. Leave out `--secret` on
-a box whose `/etc/spark/node.env` already names a key.
+`CLUSTER_KEY` is the secret for your cluster. We recommend using `openssl rand -hex 32`, but you'll
+need to pass the same key to the rest of the boxes.
 
 `setup.sh` checks the box first: an arm64 GB10, UEFI boot, DGX OS (or a running spark-os), GRUB,
-NVIDIA's apt keyrings, sudo, Docker, disk space, and the package and image hosts. Next, `setup.sh`
-warns about the new image's needs at boot: a DGX OS user with an ssh key, the `/etc/spark`
-settings, and containers that would take the same ports.
+NVIDIA's apt keyrings, sudo, Docker, disk space, and the package and image hosts.
 
-Before changing anything, `setup.sh` asks whether you have physical access to the box. A failed
-boot can need its HDMI output, a USB keyboard or a power cycle. `setup.sh` then builds the setup
-image and runs `kindling-setup install --trial`. The reboot is up to you.
+### Trial mode
 
-`setup.sh` appends every run to `~/kindling-spark-os-setup.log`, each line stamped with its UTC
-time: the checks, your answers, and each change to the box as a `change:` line followed by its
-`undo:` line. A person or an agent can reverse a run from the log. Before overwriting a file, setup
-copies it to `/var/lib/kindling-spark-os/backup/<time>/`.
+The OS is installed in "trial" mode and it auto-reboots back to DGX OS in case of failure. You'll
+need to connect via ssh and run `sparkos-promote` within 10 minutes to keep it installed. 
 
-After the reboot, check the box, then run `sparkos-promote` within 10 minutes to keep the image.
-Otherwise the box goes back to DGX OS by itself. `sparkos-rollback` goes back at any time.
+`sparkos-rollback` goes back at any time.
 
 ## Supported stacks
 
