@@ -202,6 +202,9 @@ After a trial boot, check at least:
 3. `git tag -a vX.Y.Z -m "kindling spark-os X.Y.Z"` and push the tag.
 4. Then the rest of the fleet: copy the repo (`rsync -a --delete --exclude .git`), `./setup.sh
    --yes`, reboot, check, confirm.
+5. Once the fleet runs it, move `stable`, which the README's quick start clones:
+   `git tag -f stable vX.Y.Z^{} && git push -f origin stable`. Only `stable` moves. Release tags
+   never do.
 
 ## Adding a kernel/driver pair
 

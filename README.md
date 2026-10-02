@@ -41,13 +41,15 @@ The image carries:
 
 On the box, from DGX OS:
 
-    git clone --branch v0.9.2 https://github.com/kindlingai/kindling-spark-os.git
+    git clone --branch stable https://github.com/kindlingai/kindling-spark-os.git
     cd kindling-spark-os
     ./setup.sh --check               # what is missing, changing nothing
     ./setup.sh --secret CLUSTER_KEY  # build the setup image and install a trial image
     sudo systemctl reboot
 
-`--branch` picks a release. Use the newest tag, or leave the option out for `main`.
+`stable` is a tag on the newest release that has run on a fleet. Leave `--branch` out for `main`, or
+name a release such as `v0.9.2`. In an existing clone, `git fetch --tags --force && git checkout
+stable` moves to the current stable release.
 
 `CLUSTER_KEY` is mentat's key, and every box in a cluster needs the same one. Make one for a new
 cluster with `openssl rand -hex 32`, and pass it to `setup.sh` on each box. Leave out `--secret` on
