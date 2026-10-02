@@ -20,6 +20,8 @@ name_of() {  # a short hostname for an IP, or the IP
 
 # kindling orange (xterm 208). The Linux console has 16 colours and shows its nearest one.
 BRAND=$(printf '\033[1;38;5;208m')
+LABEL=$(printf '\033[38;5;214m')
+UP=$(printf '\033[32m') STALE=$(printf '\033[33m') DOWN=$(printf '\033[1;31m')
 RESET=$(printf '\033[0m')
 
 # The body of the screen, one line per line, for a frame whose inside is $1 columns wide.
@@ -31,7 +33,7 @@ body() {
 		| awk -F', ' '{printf "  GPU %s  util %s  %sC  %s\n", $1, $2, $3, $4}'
 	free -g | awk '/^Mem:/ {printf "  memory %d of %d GiB used\n", $3, $2}'
 	echo
-	echo "containers:"
+	echo "${LABEL}containers${RESET}:"
 	# The docker client waits for a daemon that is still starting, so it gets 5 s.
 	# docker trims leading spaces from --format, so the indent is added after.
 	if ctrs=$(timeout 5 docker ps --format '{{printf "%-16s" .Names}} {{.Status}}' 2>/dev/null); then
@@ -41,16 +43,17 @@ body() {
 	fi
 	echo
 	if ! st=$(curl -s -m 3 "$STATUS"); then
-		echo "mentat: not answering on $STATUS"
+		echo "${LABEL}mentat${RESET}: not answering on $STATUS"
 		return
 	fi
 	local head
 	head=$(node_ip "$(echo "$st" | jq -r '.head_node_id')")
-	printf 'mentat: proto %s, head %s\n' "$(echo "$st" | jq -r .proto)" "$(name_of "$head")"
+	printf '%smentat%s: proto %s, head %s\n' "$LABEL" "$RESET" "$(echo "$st" | jq -r .proto)" "$(name_of "$head")"
 	echo "$st" | jq -r '.peers | to_entries[] | [.key, (if .value.alive then (if .value.stale then "stale" else "up" end) else "DOWN" end), (.value.last_seen_ms // 0 | tostring)] | @tsv' \
 		| while IFS=$'\t' read -r id state seen; do
 			ip=$(node_ip "$id")
-			printf '  %-12s %-15s %-5s\n' "$(name_of "$ip")" "$ip" "$state"
+			case $state in up) colour=$UP ;; stale) colour=$STALE ;; *) colour=$DOWN ;; esac
+			printf '  %-12s %-15s %s%s%s\n' "$(name_of "$ip")" "$ip" "$colour" "$state" "$RESET"
 		done
 	local models
 	models=$(echo "$st" | jq -r '[.groups, (.peers[].groups)] | add | keys[] | select(startswith("agent-") | not)' 2>/dev/null | sort -u | paste -sd, -)
