@@ -41,11 +41,9 @@ The image carries:
 
 On the box, from DGX OS:
 
-    git clone --branch stable https://github.com/kindlingai/kindling-spark-os.git
-    cd kindling-spark-os
-    ./setup.sh --check               # what is missing, changing nothing
-    ./setup.sh --secret CLUSTER_KEY  # build the setup image and install a trial image
-    sudo systemctl reboot
+    git clone --branch stable https://github.com/kindlingai/kindling-spark-os.git && cd kindling-spark-os && ./setup.sh --secret CLUSTER_KEY
+
+Then `sudo systemctl reboot`. `./setup.sh --check` first lists anything missing and changes nothing.
 
 `stable` is a tag on the newest release that has run on a fleet. Leave `--branch` out for `main`, or
 name a release such as `v0.9.2`. In an existing clone, `git fetch --tags --force && git checkout
