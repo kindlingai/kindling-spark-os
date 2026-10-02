@@ -257,7 +257,10 @@ The members of [kindlingai](https://github.com/kindlingai) make kindling-spark-o
 
 - [@mmastrac](https://github.com/mmastrac) (Matt Mastracci)
 - [@coffee-the-dev](https://github.com/coffee-the-dev) (Steve)
-- [@adapt-ai-systems](https://github.com/adapt-ai-systems)
+- [@adapt-ai-systems](https://github.com/adapt-ai-systems) (Chuck)
 
 Thanks to [@joesinvestments](https://github.com/joesinvestments) (Joey) for testing and lots of early
 feedback.
+
+The idea behind [dispram](dispram/) was independently discovered a few weeks before us by emihuang on
+the Nvidia forums.
