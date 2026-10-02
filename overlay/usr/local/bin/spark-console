@@ -29,13 +29,18 @@ render() {
 	printf '%*s\n' "$cols" '' | tr ' ' -
 	printf 'up %s, load %s\n' "$(uptime -p | sed 's/^up //')" "$(cut -d' ' -f1-3 /proc/loadavg)"
 	ip -o -4 addr show scope global | awk '$2 !~ /^(docker|br-|veth)/ {printf "  %-16s %s\n", $2, $4}'
-	nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,power.draw --format=csv,noheader 2>/dev/null \
+	timeout 5 nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,power.draw --format=csv,noheader 2>/dev/null \
 		| awk -F', ' '{printf "  GPU %s  util %s  %sC  %s\n", $1, $2, $3, $4}'
 	free -g | awk '/^Mem:/ {printf "  memory %d of %d GiB used\n", $3, $2}'
 	echo
 	echo "containers:"
+	# The docker client waits for a daemon that is still starting, so it gets 5 s.
 	# docker trims leading spaces from --format, so the indent is added after.
-	docker ps --format '{{printf "%-16s" .Names}} {{.Status}}' 2>/dev/null | head -8 | sed 's/^/  /'
+	if ctrs=$(timeout 5 docker ps --format '{{printf "%-16s" .Names}} {{.Status}}' 2>/dev/null); then
+		[ -n "$ctrs" ] && echo "$ctrs" | head -8 | sed 's/^/  /'
+	else
+		echo "  docker not answering yet"
+	fi
 	echo
 	if ! st=$(curl -s -m 3 "$STATUS"); then
 		echo "mentat: not answering on $STATUS"
