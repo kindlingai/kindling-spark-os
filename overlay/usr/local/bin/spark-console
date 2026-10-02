@@ -55,9 +55,12 @@ body() {
 			case $state in up) colour=$UP ;; stale) colour=$STALE ;; *) colour=$DOWN ;; esac
 			printf '  %-12s %-15s %s%s%s\n' "$(name_of "$ip")" "$ip" "$colour" "$state" "$RESET"
 		done
-	local models
-	models=$(echo "$st" | jq -r '[.groups, (.peers[].groups)] | add | keys[] | select(startswith("agent-") | not)' 2>/dev/null | sort -u | paste -sd, -)
-	printf '  models: %s\n' "${models:-none}" | fold -s -w "$cols"
+	# The model list wraps after a comma, and its continuation lines line up under the first name.
+	echo "$st" | jq -r '[.groups, (.peers[].groups)] | add | keys[] | select(startswith("agent-") | not)' 2>/dev/null | sort -u \
+		| awk -v w="$cols" '
+			BEGIN { line = "  models: " }
+			{ s = (n++ ? "," : "") $0; if (n > 1 && length(line s) > w) { print line ","; line = "          " $0 } else line = line s }
+			END { print (n ? line : line "none") }'
 }
 
 # The time in the title bar. printf's %()T is a bash builtin, so the clock ticks without a process.
