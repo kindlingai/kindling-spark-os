@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Draw the kindling logo in the top-right corner of the framebuffer console.
+
+    spark-logo [--fb /dev/fb0] [--geometry WIDTHxHEIGHTxBPP] [--cols]
+
+The logo is raw RGBA (/usr/share/kindling/logo-SIZE.rgba), composited over black, the console's
+background. It is made from docs/kindling-logo.png with:
+
+    ffmpeg -i docs/kindling-logo.png -vf scale=128:128:flags=lanczos -pix_fmt rgba -f rawvideo logo-128.rgba
+ The framebuffer's size, depth and line length come from sysfs. --geometry overrides
+them, so the drawing can be checked against an ordinary file. --cols prints how many text columns
+the logo covers (8-pixel glyphs plus a margin) and draws nothing.
+
+Exits 1 when there is no framebuffer, which is the usual case without a monitor at boot.
+"""
+import argparse
+import glob
+import mmap
+import os
+import sys
+
+MARGIN = 16
+GLYPH_W = 8
+
+
+def logo():
+    path = (glob.glob("/usr/share/kindling/logo-*.rgba") or [None])[0]
+    if path is None:
+        sys.exit(1)
+    size = int(os.path.basename(path)[5:-5])
+    return size, open(path, "rb").read()
+
+
+def sysfs(name):
+    return open(f"/sys/class/graphics/fb0/{name}").read().strip()
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--fb", default="/dev/fb0")
+    ap.add_argument("--geometry")
+    ap.add_argument("--cols", action="store_true")
+    args = ap.parse_args()
+    size, rgba = logo()
+    if args.cols:
+        print((size + 2 * MARGIN + GLYPH_W - 1) // GLYPH_W)
+        return
+    if not os.path.exists(args.fb):
+        sys.exit(1)
+    if args.geometry:
+        width, height, bpp = map(int, args.geometry.split("x"))
+        stride = width * bpp // 8
+    else:
+        width, height = map(int, sysfs("virtual_size").split(","))
+        bpp = int(sysfs("bits_per_pixel"))
+        stride = int(sysfs("stride"))
+    if bpp not in (16, 32) or width < size + 2 * MARGIN or height < size + 2 * MARGIN:
+        sys.exit(1)
+
+    x0, y0, px = width - size - MARGIN, MARGIN, bpp // 8
+    with open(args.fb, "r+b") as f:
+        fb = mmap.mmap(f.fileno(), stride * height)
+        for y in range(size):
+            row = bytearray()
+            for x in range(size):
+                r, g, b, a = rgba[(y * size + x) * 4:(y * size + x) * 4 + 4]
+                r, g, b = r * a // 255, g * a // 255, b * a // 255
+                if bpp == 32:  # XRGB8888, little-endian
+                    row += bytes((b, g, r, 0))
+                else:  # RGB565
+                    v = (r >> 3) << 11 | (g >> 2) << 5 | b >> 3
+                    row += bytes((v & 0xFF, v >> 8))
+            off = (y0 + y) * stride + x0 * px
+            fb[off:off + len(row)] = row
+        fb.close()
+
+
+if __name__ == "__main__":
+    main()
