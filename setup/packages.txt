@@ -69,6 +69,8 @@ nv-docker-options
 
 # network and admin
 network-manager
+wpasupplicant
+iw
 openssh-server
 sudo
 ca-certificates
