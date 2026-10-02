@@ -33,6 +33,7 @@
 # each line stamped with its UTC time: the checks, the answers, and each change to the box as a
 # "change:" line followed by an "undo:" line. A person or an agent can reverse a run from the log.
 set -uo pipefail
+caller=$PWD
 cd "$(dirname "$0")"
 
 # The options as the log shows them, with the key hidden.
@@ -247,8 +248,23 @@ for dev in /sys/class/net/en*; do
 		note "Ethernet $iface is up at MTU $mtu; the image sets it to $ethernet_mtu" "make sure the network it is on allows that"
 	fi
 done
-[ -n "$site" ] || { [ -d "$H/etc/kindling-spark-os/site" ] && site=/host/etc/kindling-spark-os/site; }
-[ -n "$site" ] && pass "site layer: ${site#/host}" || pass "no site layer"
+# The setup container sees the DGX OS disk at /host, so --site becomes that disk's path under /host,
+# resolved against the directory setup.sh was started from.
+if [ -n "$site" ]; then
+	case $site in /*) ;; *) site=$caller/$site ;; esac
+	site=${site#/run/sparkos/host}
+	if [ -d "$H$site" ]; then
+		pass "site layer: $site"
+		site=/host$site
+	else
+		fail "--site $site: no such directory on the DGX OS disk" "a site layer must live on the DGX OS disk, such as under /home or /etc"
+	fi
+elif [ -d "$H/etc/kindling-spark-os/site" ]; then
+	site=/host/etc/kindling-spark-os/site
+	pass "site layer: /etc/kindling-spark-os/site"
+else
+	pass "no site layer"
+fi
 
 echo
 if [ "$failed" = 1 ]; then
