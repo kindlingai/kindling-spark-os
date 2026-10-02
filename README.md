@@ -39,11 +39,15 @@ The image carries:
 
 ## Quick start
 
-On the box, from DGX OS, in a checkout or unpacked download of this repository:
+On the box, from DGX OS:
 
-    ./setup.sh --check              # what is missing, changing nothing
+    git clone --branch v0.9.2 https://github.com/kindlingai/kindling-spark-os.git
+    cd kindling-spark-os
+    ./setup.sh --check               # what is missing, changing nothing
     ./setup.sh --secret CLUSTER_KEY  # build the setup image and install a trial image
     sudo systemctl reboot
+
+`--branch` picks a release. Use the newest tag, or leave the option out for `main`.
 
 `CLUSTER_KEY` is mentat's key, and every box in a cluster needs the same one. Make one for a new
 cluster with `openssl rand -hex 32`, and pass it to `setup.sh` on each box. Leave out `--secret` on
@@ -60,8 +64,8 @@ image and runs `kindling-setup install --trial`. The reboot is up to you.
 
 `setup.sh` appends every run to `~/kindling-spark-os-setup.log`, each line stamped with its UTC
 time: the checks, your answers, and each change to the box as a `change:` line followed by its
-`undo:` line. A person or an agent can reverse a run from the log. Before overwriting a file, setup copies it to
-`/var/lib/kindling-spark-os/backup/<time>/`.
+`undo:` line. A person or an agent can reverse a run from the log. Before overwriting a file, setup
+copies it to `/var/lib/kindling-spark-os/backup/<time>/`.
 
 After the reboot, check the box, then run `sparkos-promote` within 10 minutes to keep the image.
 Otherwise the box goes back to DGX OS by itself. `sparkos-rollback` goes back at any time.
