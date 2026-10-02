@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Draw the kindling logo in the top-right corner of the framebuffer console.
 
-    spark-logo [--fb /dev/fb0] [--geometry WIDTHxHEIGHTxBPP] [--cols]
+    spark-logo [--fb /dev/fb0] [--geometry WIDTHxHEIGHTxBPP] [--top PIXELS] [--right PIXELS]
 
 The logo is raw RGBA (/usr/share/kindling/logo-SIZE.rgba), composited over black, the console's
 background. It is made from docs/kindling-logo.png with:
 
     ffmpeg -i docs/kindling-logo.png -vf scale=128:128:flags=lanczos -pix_fmt rgba -f rawvideo logo-128.rgba
  The framebuffer's size, depth and line length come from sysfs. --geometry overrides
-them, so the drawing can be checked against an ordinary file. --cols prints how many text columns
-the logo covers (8-pixel glyphs plus a margin) and draws nothing.
+them, so the drawing can be checked against an ordinary file. --top and --right place the logo's
+top-right corner, in pixels from the top and right edges (default 16 each).
 
 Exits 1 when there is no framebuffer, which is the usual case without a monitor at boot.
 """
@@ -20,7 +20,6 @@ import os
 import sys
 
 MARGIN = 16
-GLYPH_W = 8
 
 
 def logo():
@@ -39,12 +38,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fb", default="/dev/fb0")
     ap.add_argument("--geometry")
-    ap.add_argument("--cols", action="store_true")
+    ap.add_argument("--top", type=int, default=MARGIN)
+    ap.add_argument("--right", type=int, default=MARGIN)
     args = ap.parse_args()
     size, rgba = logo()
-    if args.cols:
-        print((size + 2 * MARGIN + GLYPH_W - 1) // GLYPH_W)
-        return
     if not os.path.exists(args.fb):
         sys.exit(1)
     if args.geometry:
@@ -54,10 +51,10 @@ def main():
         width, height = map(int, sysfs("virtual_size").split(","))
         bpp = int(sysfs("bits_per_pixel"))
         stride = int(sysfs("stride"))
-    if bpp not in (16, 32) or width < size + 2 * MARGIN or height < size + 2 * MARGIN:
+    if bpp not in (16, 32) or width < size + args.right or height < size + args.top:
         sys.exit(1)
 
-    x0, y0, px = width - size - MARGIN, MARGIN, bpp // 8
+    x0, y0, px = width - size - args.right, args.top, bpp // 8
     with open(args.fb, "r+b") as f:
         fb = mmap.mmap(f.fileno(), stride * height)
         for y in range(size):

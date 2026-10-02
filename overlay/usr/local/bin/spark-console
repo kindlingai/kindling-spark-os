@@ -1,7 +1,10 @@
 #!/bin/bash
-# Cluster and box status for the console, redrawn every REFRESH seconds (default 30).
+# Cluster and box status for the console, redrawn every REFRESH seconds (default 30), in a frame
+# that fills the screen. Its edges also give a KVM's auto-adjust something to lock onto.
 # Esc or Enter hands the terminal to login. spark-console --once prints one screen and exits.
 set -u
+# The frame is drawn in multi-byte box characters, which lengths and slices must count as one.
+export LC_ALL=C.UTF-8
 REFRESH=${REFRESH:-30}
 STATUS=${MENTAT_STATUS:-http://127.0.0.1:6380/status}
 
@@ -19,21 +22,9 @@ name_of() {  # a short hostname for an IP, or the IP
 BRAND=$(printf '\033[1;38;5;208m')
 RESET=$(printf '\033[0m')
 
-# With a framebuffer console, the kindling logo sits in the top-right corner, redrawn after each
-# screen. The rule under the title stops short of it.
-LOGO_COLS=0
-if [ -e /dev/fb0 ] && command -v spark-logo >/dev/null; then
-	LOGO_COLS=$(spark-logo --cols 2>/dev/null || echo 0)
-fi
-
-render() {
-	local cols st now
-	cols=$(tput cols 2>/dev/null || echo 80)
-	now=$(date '+%Y-%m-%d %H:%M:%S %Z')
-	printf '%skindling%s spark-os %s (%s)  %s  %s\n' "$BRAND" "$RESET" \
-		"$(cat /etc/kindling/version 2>/dev/null || echo '?')" \
-		"$(cat /etc/spark-os-version 2>/dev/null || echo '?')" "$(hostname)" "$now"
-	printf '%*s\n' "$((cols - LOGO_COLS))" '' | tr ' ' -
+# The body of the screen, one line per line, for a frame whose inside is $1 columns wide.
+body() {
+	local cols=$1 st
 	printf 'up %s, load %s\n' "$(uptime -p | sed 's/^up //')" "$(cut -d' ' -f1-3 /proc/loadavg)"
 	ip -o -4 addr show scope global | awk '$2 !~ /^(docker|br-|veth)/ {printf "  %-16s %s\n", $2, $4}'
 	timeout 5 nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,power.draw --format=csv,noheader 2>/dev/null \
@@ -66,15 +57,59 @@ render() {
 	printf '  models: %s\n' "${models:-none}" | fold -s -w "$cols"
 }
 
-if [ "${1:-}" = --once ]; then render; exit 0; fi
+# The line inside the frame: $1 padded with spaces to $2 visible columns, colour codes not counted.
+pad() {
+	local plain
+	plain=$(printf '%s' "$1" | sed 's/\x1b\[[0-9;]*m//g')
+	printf '%s%*s' "$1" "$(($2 - ${#plain} > 0 ? $2 - ${#plain} : 0))" ''
+}
 
+# The whole screen: a frame on its edges, the title bar, the body, and the footer in the bottom
+# border. The last line has no newline, so the console does not scroll the top border away.
+screen() {
+	local cols rows inner bar left right footer fplain i
+	cols=$(tput cols 2>/dev/null || echo 80)
+	rows=$(tput lines 2>/dev/null || echo 24)
+	inner=$((cols - 4))
+	printf -v bar '%*s' "$((cols - 2))" ''
+	bar=${bar// /─}
+	left="${BRAND}kindling${RESET} spark OS $(cat /etc/kindling/version 2>/dev/null || echo '?') ($(cat /etc/spark-os-version 2>/dev/null || echo '?'))"
+	right="$(hostname)  $(date '+%Y-%m-%d %H:%M:%S %Z')"
+	local -a lines
+	mapfile -t lines < <(body "$inner" | cut -c1-"$inner")
+	printf '┌%s┐\n' "$bar"
+	printf '│ %s %s │\n' "$(pad "$left" "$((inner - ${#right} - 1))")" "$right"
+	printf '├%s┤\n' "$bar"
+	for ((i = 0; i < rows - 4; i++)); do
+		printf '│ %s │\n' "$(pad "${lines[i]:-}" "$inner")"
+	done
+	footer="─ ${BRAND}kindling${RESET} - Esc to log in - refreshes every ${REFRESH}s "
+	fplain=$(printf '%s' "$footer" | sed 's/\x1b\[[0-9;]*m//g')
+	printf '└%s%s┘' "$footer" "${bar:0:$((cols - 2 - ${#fplain}))}"
+}
+
+# The logo goes inside the body's top-right corner, half a line below the title bar's divider. The
+# framebuffer's cell size gives the pixel offsets.
+logo() {
+	local w h cw ch
+	IFS=, read -r w h < /sys/class/graphics/fb0/virtual_size || return
+	cw=$((w / $(tput cols))) ch=$((h / $(tput lines)))
+	spark-logo --top $((3 * ch + ch / 2)) --right $((2 * cw)) 2>/dev/null
+}
+
+if [ "${1:-}" = --once ]; then screen; echo; exit 0; fi
+
+# Each screen is built in memory, then written over the last from the top-left corner in one write.
+# Every line spans the full width, so nothing needs clearing and the screen never goes blank.
+printf '\033[?25l'  # no cursor blinking in the frame
+clear
 while :; do
-	clear
-	render
-	printf '\n%skindling%s - Esc to log in - refreshes every %ss\n' "$BRAND" "$RESET" "$REFRESH"
-	[ "$LOGO_COLS" -gt 0 ] && spark-logo 2>/dev/null
+	frame=$(screen)
+	printf '\033[H%s' "$frame"
+	[ -e /dev/fb0 ] && command -v spark-logo >/dev/null && logo
 	if IFS= read -rsn1 -t "$REFRESH" key; then
 		if [ "$key" = $'\e' ] || [ -z "$key" ]; then
+			printf '\033[?25h'
 			clear
 			exec /bin/login
 		fi
