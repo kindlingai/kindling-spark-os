@@ -57,6 +57,11 @@ body() {
 	printf '  models: %s\n' "${models:-none}" | fold -s -w "$cols"
 }
 
+# The time in the title bar. printf's %()T is a bash builtin, so the clock ticks without a process.
+now() {
+	printf '%(%Y-%m-%d %H:%M:%S %Z)T' -1
+}
+
 # The line inside the frame: $1 padded with spaces to $2 visible columns, colour codes not counted.
 pad() {
 	local plain
@@ -74,7 +79,7 @@ screen() {
 	printf -v bar '%*s' "$((cols - 2))" ''
 	bar=${bar// /─}
 	left="${BRAND}kindling${RESET} spark OS $(cat /etc/kindling/version 2>/dev/null || echo '?') ($(cat /etc/spark-os-version 2>/dev/null || echo '?'))"
-	right="$(hostname)  $(date '+%Y-%m-%d %H:%M:%S %Z')"
+	right="$(hostname)  $(now)"
 	local -a lines
 	mapfile -t lines < <(body "$inner" | cut -c1-"$inner")
 	printf '┌%s┐\n' "$bar"
@@ -101,17 +106,38 @@ if [ "${1:-}" = --once ]; then screen; echo; exit 0; fi
 
 # Each screen is built in memory, then written over the last from the top-left corner in one write.
 # Every line spans the full width, so nothing needs clearing and the screen never goes blank.
-printf '\033[?25l'  # no cursor blinking in the frame
-clear
-while :; do
+draw() {
 	frame=$(screen)
 	printf '\033[H%s' "$frame"
 	[ -e /dev/fb0 ] && command -v spark-logo >/dev/null && logo
-	if IFS= read -rsn1 -t "$REFRESH" key; then
+	cols=$(tput cols 2>/dev/null || echo 80)
+	redraw_at=$((SECONDS + REFRESH))
+}
+
+# Between screens, only the clock is rewritten, once a second on the second: the title bar's last
+# columns, so the console repaints about 23 characters.
+tick() {
+	local t
+	printf -v t '%(%Y-%m-%d %H:%M:%S %Z)T' -1
+	printf '\033[2;%dH%s' "$((cols - 1 - ${#t}))" "$t"
+}
+
+printf '\033[?25l'  # no cursor blinking in the frame
+clear
+draw
+while :; do
+	us=${EPOCHREALTIME#*.}
+	wait_us=$((1000000 - 10#$us))
+	printf -v wait '%d.%06d' $((wait_us / 1000000)) $((wait_us % 1000000))
+	if IFS= read -rsn1 -t "$wait" key; then
 		if [ "$key" = $'\e' ] || [ -z "$key" ]; then
 			printf '\033[?25h'
 			clear
 			exec /bin/login
 		fi
+	elif ((SECONDS >= redraw_at)); then
+		draw
+	else
+		tick
 	fi
 done
