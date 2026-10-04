@@ -49,6 +49,11 @@ The method depends on RM internals, so `dispramd` runs only on the driver releas
   65,536 tokens. Against a baseline with the same 2.99 GiB in ordinary memory, 10 greedy completions
   (9 to 14,041 prompt tokens, sent one at a time) were identical. The KV layout was layer-major,
   so every request used the carveout for its last layers.
+- vLLM's V2 model runner (`vllm/v1/worker/gpu`), serving a 3.25 bpw GLM-5.3 at TP=4 with the
+  plugin: 101 KV tensors in one 20.63 GiB buffer, 2.00 GiB of it in the carveout. The KV cache grew
+  from 365,440 to 404,608 tokens with decode and prefill speed unchanged, and KL against runs
+  without dispram (0.017) matched run-to-run noise. Greedy text is no test on that stack: two boots
+  without dispram already differ.
 
 ## vLLM
 
@@ -65,9 +70,13 @@ vLLM with:
     patch -p1 -d /usr/local/lib/python3.12/dist-packages < vllm/kv-cache-from-dispram.patch
 
 For stock images, `python/dispram_vllm.py` does the same at runtime as a vLLM general plugin. It
-stands aside when the patch is present. Run either way with:
+stands aside when the patch is present. vLLM's V2 model runner allocates one tensor per KV cache
+tensor instead of one buffer, so for it the plugin glues one buffer for all of them and hands each
+its slice. If it finds neither allocator, it leaves the KV budget alone. Run either way with:
 
     -v /run/dispram:/run/dispram -v /opt/kindling/dispram/python:/opt/dispram:ro -e PYTHONPATH=/opt/dispram
+
+Append `/opt/dispram` to the image's own `PYTHONPATH` if it sets one.
 
 Under tensor parallelism, every rank should have dispram, because vLLM takes the smallest KV budget
 across ranks.
