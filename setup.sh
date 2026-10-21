@@ -219,8 +219,8 @@ for src in "${sources[@]}"; do
 		continue
 	fi
 	missing=
-	for key in $(grep -oE '(signed-by=|Signed-By: *)/[^] ]+' "$H$src" | sed -E 's/^(signed-by=|Signed-By: *)//'); do
-		[ -f "$H$key" ] || missing="$missing $key"
+	for source_key in $(grep -oE '(signed-by=|Signed-By: *)/[^] ]+' "$H$src" | sed -E 's/^(signed-by=|Signed-By: *)//'); do
+		[ -f "$H$source_key" ] || missing="$missing $source_key"
 	done
 	[ -z "$missing" ] && pass "apt source $src" || fail "--sources $src names keyrings missing from DGX OS:$missing"
 done
