@@ -118,6 +118,8 @@ Options:
   they keep DGX OS's setting.
 - `--fabric-addr`: give the ConnectX ports their addresses from what each cable reaches, with no
   setup (see [Fabric addresses](#fabric-addresses)). Off by default.
+- `--thermal-cap`: cap the GPU clock to hold the GPU at or below a target temperature (see
+  [GPU temperature](#gpu-temperature)). Off by default.
 - `--site DIR` (below).
 
 `setup.sh` takes the same options. `list` shows the installed images and GRUB's state. `stack`
@@ -203,6 +205,25 @@ ARP probe finds nobody already using it.
 system name) and `FABRIC_MTU` (default 9000). `sparkos-fabric --dry-run` prints what each netdev
 hears and the address it would take.
 
+## GPU temperature
+
+Hours of full load take a GB10 past 85 C, and one has powered itself off near 88 C. With
+`--thermal-cap`, `sparkos-thermal` caps the graphics clock every 15 s:
+
+| GPU temperature | Cap |
+|---|---|
+| target + 7 C or more (default 87 C) | straight down to the floor, 1500 MHz |
+| above the target (default 80 C) | down 100 MHz for every 2 C over, at most 300 MHz a step |
+| between the optimal temperature and the target | unchanged |
+| at or below the optimal temperature (default 75 C) for a minute, while the GPU is busy | up 100 MHz, then another minute |
+| any temperature while the GPU is idle, below the target | unchanged |
+
+Load comes in bursts, and an idle GPU sits near 45-55 C. A cap raised while idle would meet the next
+burst at full clock, so the cap only rises while the GPU works. The cap starts at 2000 MHz and never
+passes 2400 MHz. `/etc/spark/thermal.conf` overrides `THERMAL_TARGET`, `THERMAL_OPTIMAL`,
+`THERMAL_INTERVAL`, `THERMAL_MIN_MHZ`, `THERMAL_MAX_MHZ`, `THERMAL_START_MHZ`, `THERMAL_BUSY_PCT`
+(default 10%) and `THERMAL_RAISE_AFTER_S` (default 60). Stopping the service removes the cap.
+
 ## Third-party software
 
 ### Tailscale
@@ -252,6 +273,7 @@ Anything specific to one fleet goes in a site layer, so fleet addresses stay out
 | `sparkos-trial-revert.timer` | reverts an unconfirmed trial boot |
 | `lldpd` | names the box to its switch and directly cabled peers; `lldpctl` shows what each port is cabled to |
 | `sparkos-fabric` | ConnectX addresses from LLDP, with `--fabric-addr` only (see [Fabric addresses](#fabric-addresses)) |
+| `sparkos-thermal` | GPU clock cap from temperature, with `--thermal-cap` only (see [GPU temperature](#gpu-temperature)) |
 
 ## dispram
 

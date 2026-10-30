@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Hold the GPU at or below a target temperature by capping its clock.
+
+    sparkos-thermal [--dry-run]
+
+Every THERMAL_INTERVAL seconds (default 15) it reads the GPU's temperature and utilization and moves a cap on the
+graphics clock (nvidia-smi --lock-gpu-clocks=0,CAP):
+
+- above THERMAL_TARGET (default 80 C): down 100 MHz for every 2 C over, at most 300 MHz a step
+- at THERMAL_TARGET + 7 C or more: straight down to THERMAL_MIN_MHZ, since a GB10 has powered itself off near 88 C
+- at or below THERMAL_OPTIMAL (default 75 C) for a minute while the GPU is busy: up 100 MHz, then another minute
+- in between, or while the GPU is idle: unchanged
+
+Load on these boxes comes in bursts, and an idle GPU sits near 45-55 C, so a cap raised while idle meets the next
+burst at full clock and overshoots. Raising only while busy keeps the cap that held the last burst. The cap starts at
+THERMAL_START_MHZ (2000) and stays within THERMAL_MIN_MHZ (1500) and THERMAL_MAX_MHZ (2400). Stopping the service
+removes the cap (sparkos-thermal.service). Overrides: /etc/spark/thermal.conf, one KEY=VALUE a line.
+"""
+import os
+import shlex
+import subprocess
+import sys
+import time
+
+CONF = "/etc/spark/thermal.conf"
+DEFAULTS = {"THERMAL_TARGET": 80, "THERMAL_OPTIMAL": 75, "THERMAL_INTERVAL": 15, "THERMAL_MIN_MHZ": 1500,
+            "THERMAL_MAX_MHZ": 2400, "THERMAL_START_MHZ": 2000, "THERMAL_BUSY_PCT": 10, "THERMAL_RAISE_AFTER_S": 60}
+STEP = 100
+
+
+def config(path=CONF):
+    c = dict(DEFAULTS)
+    if os.path.exists(path):
+        for line in open(path):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                if k.strip() in c:
+                    c[k.strip()] = int(" ".join(shlex.split(v)))
+    if not c["THERMAL_OPTIMAL"] < c["THERMAL_TARGET"]:
+        raise SystemExit(f"THERMAL_OPTIMAL ({c['THERMAL_OPTIMAL']}) must be below THERMAL_TARGET ({c['THERMAL_TARGET']})")
+    if not c["THERMAL_MIN_MHZ"] <= c["THERMAL_START_MHZ"] <= c["THERMAL_MAX_MHZ"]:
+        raise SystemExit("THERMAL_START_MHZ must lie between THERMAL_MIN_MHZ and THERMAL_MAX_MHZ")
+    return c
+
+
+def decide(c, cap, temp, util, cool_since, now):
+    """The next (cap, cool_since): cool_since is when the GPU last went at or below optimal while busy, or None."""
+    over = temp - c["THERMAL_TARGET"]
+    if over >= 7:
+        return c["THERMAL_MIN_MHZ"], None
+    if over > 0:
+        return max(c["THERMAL_MIN_MHZ"], cap - STEP * min(3, (over + 1) // 2)), None
+    if temp > c["THERMAL_OPTIMAL"] or util < c["THERMAL_BUSY_PCT"]:
+        return cap, None
+    if cool_since is None:
+        return cap, now
+    if now - cool_since >= c["THERMAL_RAISE_AFTER_S"] and cap < c["THERMAL_MAX_MHZ"]:
+        return min(c["THERMAL_MAX_MHZ"], cap + STEP), now
+    return cap, cool_since
+
+
+def read():
+    out = subprocess.run(["nvidia-smi", "--query-gpu=temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"],
+                         capture_output=True, text=True, check=True).stdout
+    temp, util = (int(x) for x in out.splitlines()[0].split(","))
+    return temp, util
+
+
+def lock(cap):
+    subprocess.run(["nvidia-smi", f"--lock-gpu-clocks=0,{cap}"], capture_output=True, check=True)
+
+
+def main():
+    c = config()
+    dry = "--dry-run" in sys.argv
+    cap, cool_since = c["THERMAL_START_MHZ"], None
+    if not dry:
+        lock(cap)
+    print(f"cap {cap} MHz; target {c['THERMAL_TARGET']} C, optimal {c['THERMAL_OPTIMAL']} C, every "
+          f"{c['THERMAL_INTERVAL']} s", flush=True)
+    while True:
+        try:
+            temp, util = read()
+        except (OSError, subprocess.CalledProcessError, ValueError) as e:
+            print(f"nvidia-smi: {e}", flush=True)
+            time.sleep(c["THERMAL_INTERVAL"])
+            continue
+        new, cool_since = decide(c, cap, temp, util, cool_since, time.monotonic())
+        if dry:
+            print(f"{temp} C, {util}% busy: cap {cap} -> {new} MHz", flush=True)
+            return
+        if new != cap:
+            try:
+                lock(new)
+                print(f"{temp} C, {util}% busy: cap {cap} -> {new} MHz", flush=True)
+                cap = new
+            except (OSError, subprocess.CalledProcessError) as e:
+                print(f"nvidia-smi --lock-gpu-clocks=0,{new}: {e}", flush=True)
+        time.sleep(c["THERMAL_INTERVAL"])
+
+
+if __name__ == "__main__":
+    main()

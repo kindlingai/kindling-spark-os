@@ -1,0 +1,15 @@
+# Caps the GPU clock to hold the GPU at or below a target temperature (see sparkos-thermal). On only in an image
+# installed with --thermal-cap. Stopping it removes the cap.
+[Unit]
+Description=GPU clock cap from temperature
+ConditionPathExists=/etc/kindling/thermal-cap
+After=nvidia-persistenced.service
+
+[Service]
+ExecStart=/usr/local/sbin/sparkos-thermal
+ExecStopPost=/usr/bin/nvidia-smi --reset-gpu-clocks
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

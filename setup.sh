@@ -4,7 +4,7 @@
 #
 #   ./setup.sh [--check] [--yes] [--stack STACK] [--flavour nvidia-64k|nvidia] [--site DIR] [--no-trial]
 #              [--packages "P ..."] [--sources FILE] [--mounts "DIR ..."] [--hostname-kindling]
-#              [--connectx-mtu N] [--ethernet-mtu N] [--fabric-addr] [--secret KEY]
+#              [--connectx-mtu N] [--ethernet-mtu N] [--fabric-addr] [--thermal-cap] [--secret KEY]
 #
 #   --check     only check the prerequisites; change nothing
 #   --yes       answer yes to both questions (physical access, and building and installing)
@@ -19,6 +19,7 @@
 #   --connectx-mtu  RoCE MTU for the ConnectX ports (default 4096; 0 off): raises any port too small
 #   --ethernet-mtu  exact MTU for the onboard Ethernet ports (default: as DGX OS sets it)
 #   --fabric-addr  ConnectX addresses from what each cable reaches (LLDP), with no setup; off by default
+#   --thermal-cap  cap the GPU clock to hold it at or below 80 C (/etc/spark/thermal.conf); off by default
 #   --secret    mentat's cluster key, the same on every box; required when the box has none. Make one
 #               for a new cluster with: openssl rand -hex 32
 #
@@ -40,7 +41,7 @@ cd "$(dirname "$0")"
 # The options as the log shows them, with the key hidden.
 options=$(printf '%s\n' "$@" | sed '/^--secret$/{n;s/.*/<hidden>/;}' | xargs)
 check_only=0 yes=0 stack= flavour=nvidia-64k site= trial=1 packages= sources=() mounts= hostname_kindling=0
-connectx_mtu=4096 ethernet_mtu=0 fabric_addr=0 secret=
+connectx_mtu=4096 ethernet_mtu=0 fabric_addr=0 thermal_cap=0 secret=
 while [ $# -gt 0 ]; do
 	case $1 in
 		--check) check_only=1; shift ;;
@@ -56,6 +57,7 @@ while [ $# -gt 0 ]; do
 		--connectx-mtu) connectx_mtu=$2; shift 2 ;;
 		--ethernet-mtu) ethernet_mtu=$2; shift 2 ;;
 		--fabric-addr) fabric_addr=1; shift ;;
+		--thermal-cap) thermal_cap=1; shift ;;
 		--secret) secret=$2; shift 2 ;;
 		-h|--help) sed -n '2,/^set -uo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "setup.sh: unknown option $1 (try --help)" >&2; exit 2 ;;
@@ -353,6 +355,7 @@ for src in "${sources[@]}"; do args+=(--sources "$src"); done
 [ "$hostname_kindling" = 1 ] && args+=(--hostname-kindling)
 args+=(--connectx-mtu "$connectx_mtu" --ethernet-mtu "$ethernet_mtu")
 [ "$fabric_addr" = 1 ] && args+=(--fabric-addr)
+[ "$thermal_cap" = 1 ] && args+=(--thermal-cap)
 install_out=$(mktemp)
 $sudo docker run --rm --privileged --network host -v "$host:/host" "$tag" "${args[@]}" | tee "$install_out"
 installed=$(sed -n 's/^installed spark-os //p' "$install_out")

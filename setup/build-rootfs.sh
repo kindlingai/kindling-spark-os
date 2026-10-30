@@ -55,6 +55,8 @@ cp -a "$K/stack/stack.env" "$stage/etc/kindling/stack.env"
 [ "${ETHERNET_MTU:-0}" -gt 0 ] && echo "$ETHERNET_MTU" > "$stage/etc/kindling/ethernet-mtu"
 # sparkos-fabric and sparkos-fabric-nm start only when this file exists.
 [ "${FABRIC_ADDR:-0}" = 1 ] && touch "$stage/etc/kindling/fabric-addr"
+# sparkos-thermal starts only when this file exists.
+[ "${THERMAL_CAP:-0}" = 1 ] && touch "$stage/etc/kindling/thermal-cap"
 if [ "${DISPRAM_VALIDATED:-0}" = 1 ]; then
   echo "DISPRAM_DRIVER=$DRIVER_UPSTREAM" > "$stage/etc/kindling/dispram.env"
 fi

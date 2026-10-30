@@ -10,7 +10,7 @@
 # Commands:
 #   install [--flavour F] [--version V] [--site DIR] [--packages "P ..."] [--sources FILE]
 #           [--mounts "DIR ..."] [--hostname-kindling] [--connectx-mtu N] [--ethernet-mtu N] [--fabric-addr]
-#           [--trial]
+#           [--thermal-cap] [--trial]
 #       Build an image and add it to GRUB. --trial also makes it the next boot, once. DGX OS stays
 #       the default until sparkos-promote is run from a booted image.
 #   build [--flavour F] [--version V] [--site DIR] [--packages "P ..."] [--sources FILE]
@@ -50,6 +50,10 @@
 # --fabric-addr turns on sparkos-fabric: the ConnectX ports leave NetworkManager, and each netdev gets
 # the address of what its cable reaches, found by LLDP (the switch, or another box running it). See
 # overlay/usr/local/sbin/sparkos-fabric. Off by default.
+#
+# --thermal-cap turns on sparkos-thermal: the GPU clock is capped to hold the GPU at or below a target temperature
+# (default 80 C), and raised again while the GPU is busy below an optimal one (75 C). /etc/spark/thermal.conf sets
+# them per box. See overlay/usr/local/sbin/sparkos-thermal. Off by default.
 #
 # --hostname-kindling names the box kindling-XXXX under spark-os (XXXX: the last four hex digits of
 # its LAN port's MAC, as NVIDIA's gx10-XXXX), recorded in /etc/kindling-spark-os/hostname on the DGX
@@ -95,7 +99,7 @@ check_host() {
 }
 
 flavour=nvidia-64k version= site= out= trial=0 packages= sources=() mounts= hostname=
-connectx_mtu=4096 ethernet_mtu=0 fabric_addr=0
+connectx_mtu=4096 ethernet_mtu=0 fabric_addr=0 thermal_cap=0
 parse() {
   while [ $# -gt 0 ]; do
     case $1 in
@@ -111,6 +115,7 @@ parse() {
       --connectx-mtu) connectx_mtu=$2; shift 2 ;;
       --ethernet-mtu) ethernet_mtu=$2; shift 2 ;;
       --fabric-addr) fabric_addr=1; shift ;;
+      --thermal-cap) thermal_cap=1; shift ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -177,8 +182,9 @@ build() {
   [ -n "$mounts" ] && echo "extra mounts:$mounts"
   echo "ConnectX RoCE MTU: ${connectx_mtu/#0/off}; Ethernet MTU: ${ethernet_mtu/#0/as DGX OS sets it}"
   [ "$fabric_addr" = 1 ] && echo "ConnectX addresses: sparkos-fabric (LLDP)"
+  [ "$thermal_cap" = 1 ] && echo "GPU clock: sparkos-thermal (temperature cap)"
   OUT=$out VERSION=$version FLAVOUR=$flavour SITE=$site HOST=$host EXTRA_PACKAGES=$packages \
-    EXTRA_SOURCES="${sources[*]}" EXTRA_MOUNTS=$mounts CONNECTX_MTU=$connectx_mtu ETHERNET_MTU=$ethernet_mtu FABRIC_ADDR=$fabric_addr \
+    EXTRA_SOURCES="${sources[*]}" EXTRA_MOUNTS=$mounts CONNECTX_MTU=$connectx_mtu ETHERNET_MTU=$ethernet_mtu FABRIC_ADDR=$fabric_addr THERMAL_CAP=$thermal_cap \
     "$K/setup/build-rootfs.sh" ||
     { clean_out; die "build failed"; }
 }
