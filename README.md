@@ -165,8 +165,10 @@ These files are in `/etc/spark` on each box's own disk. The initramfs copies the
 
 - `node.env` for `mentatd`: `MENTAT_SECRET_FILE`, and optionally `MENTAT_PEERS`,
   `MENTAT_ANNOUNCE_IFACES` and `MENTAT_NODE_IP`. Without it `mentatd` does not start.
-  `setup.sh --secret` writes one with the key alone, which is enough: `mentatd` waits for the LAN,
-  uses its address, and finds the other boxes by their broadcasts on the same network.
+  `setup.sh --secret` writes one with the key, which is enough: `mentatd` waits for the LAN, uses
+  its address, and finds the other boxes by their broadcasts on the same network. `setup.sh` also
+  adds `MENTAT_ANNOUNCE_IFACES=en*f*np*=connectx+rdma,en*=lan` when `node.env` has no line of its
+  own, so the ConnectX ports carry the `rdma` tag that gr8 picks its fabric addresses by.
 - `agent.env` for the spark agent, optional. The agent reads the cluster from the local `mentatd`
   and answers loopback and the box's own subnets. `MENTAT_ROUTER_URL` names the router: the page
   links to it, and the agent always lets it in. `ALLOWED_SOURCES` replaces the subnets with

@@ -184,8 +184,12 @@ fi
 # mentat's key signs every announcement, so a box with no key, or a different one, never joins the
 # cluster. mentat trims whitespace around the key. The comparison here drops all whitespace, which
 # gives the same answer for any key without spaces inside it.
-node_env=$H/etc/spark/node.env key_file= key=
+node_env=$H/etc/spark/node.env key_file= key= announce=
+# Which interfaces mentatd announces, and their tags: the ConnectX ports as rdma (gr8 and other RDMA clients pick
+# their fabric addresses by that tag), everything else as the LAN. Added when node.env has no line of its own.
+ANNOUNCE='en*f*np*=connectx+rdma,en*=lan'
 if $sudo test -f "$node_env"; then
+	announce=$($sudo sed -n 's/^[[:space:]]*MENTAT_ANNOUNCE_IFACES=//p' "$node_env" | tail -1)
 	key_file=$($sudo sed -n 's/^[[:space:]]*MENTAT_SECRET_FILE=//p' "$node_env" | tail -1 | tr -d \'\")
 	if [ -n "$key_file" ]; then
 		key=$($sudo cat "$H$key_file" 2>/dev/null | tr -d '[:space:]')
@@ -206,6 +210,11 @@ elif [ -n "$(printf %s "$secret" | tr -d '[:space:]')" ]; then
 else
 	fail "no mentat key, so this box cannot join a mentat cluster" \
 		"pass --secret KEY with the same key on every box; make one for a new cluster with: openssl rand -hex 32"
+fi
+if [ -n "$announce" ]; then
+	pass "mentat announces: $announce (node.env)"
+else
+	pass "mentat announces: $ANNOUNCE (setup adds it to node.env)"
 fi
 if [ "$docker_ok" = 1 ]; then
 	for c in mentatd spark-agent; do
@@ -322,6 +331,11 @@ if [ -z "$key" ] && [ -n "$secret" ]; then
 		echo "change: wrote /etc/spark/node.env with MENTAT_SECRET_FILE=/etc/spark/mentat.key"
 		echo "  undo: sudo rm /etc/spark/node.env"
 	fi
+fi
+if [ -z "$announce" ] && $sudo test -f "$node_env"; then
+	echo "MENTAT_ANNOUNCE_IFACES=$ANNOUNCE" | $sudo tee -a "$node_env" >/dev/null
+	echo "change: added MENTAT_ANNOUNCE_IFACES=$ANNOUNCE to /etc/spark/node.env"
+	echo "  undo: sudo sed -i '/^MENTAT_ANNOUNCE_IFACES=/d' /etc/spark/node.env"
 fi
 echo "building the setup image (a few minutes the first time)..."
 build_log=$(mktemp /tmp/kindling-setup-build.XXXXXX.log)
