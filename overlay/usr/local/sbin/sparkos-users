@@ -15,13 +15,14 @@
 #   - /etc/subuid and /etc/subgid are not copied
 # Nothing here is baked into the image, so no password hash ever sits in an image file.
 set -eu
-# SPARKOS_HOST_ETC, SPARKOS_ETC and SPARKOS_ROOT point it at copies, for testing.
+# SPARKOS_HOST_ETC, SPARKOS_ETC, SPARKOS_ROOT and SPARKOS_TMP point it at copies, for testing.
 H=${SPARKOS_HOST_ETC:-/run/sparkos/host/etc}
 E=${SPARKOS_ETC:-/etc}
 R=${SPARKOS_ROOT:-}
 [ -f "$H/passwd" ] || exit 0
 umask 077
-tmp=$(mktemp -d)
+# /run, not /tmp: a --mounts /tmp bind or systemd-tmpfiles-setup can replace /tmp while this runs
+tmp=$(mktemp -d -p "${SPARKOS_TMP:-/run}")
 trap 'rm -rf "$tmp"' EXIT
 
 awk -F: '$3 >= 1000 && $3 < 60000 {print $1}' "$H/passwd" > "$tmp/users"

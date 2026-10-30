@@ -4,6 +4,8 @@
 [Unit]
 Description=Mark this spark-os boot as good for GRUB
 After=multi-user.target
+# A boot that imported no users has no logins: leave recordfail set so the next boot is DGX OS.
+Requires=sparkos-users.service
 ConditionPathIsMountPoint=/run/sparkos/host
 StartLimitIntervalSec=0
 
