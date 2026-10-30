@@ -116,6 +116,8 @@ Options:
   link must accept the larger frames. `setup.sh --check` lists the ports the image will raise.
 - `--ethernet-mtu N`: an exact MTU for the other Ethernet ports, such as the RJ45 port. By default
   they keep DGX OS's setting.
+- `--fabric-addr`: give the ConnectX ports their addresses from what each cable reaches, with no
+  setup (see [Fabric addresses](#fabric-addresses)). Off by default.
 - `--site DIR` (below).
 
 `setup.sh` takes the same options. `list` shows the installed images and GRUB's state. `stack`
@@ -173,6 +175,32 @@ These files are in `/etc/spark` on each box's own disk. The initramfs copies the
 Boxes moving over from the container deployments should stop the `mentatd` and `spark-agent`
 containers (`docker update --restart=no` and `docker stop`). Otherwise the containers take the same ports.
 
+## Fabric addresses
+
+With `--fabric-addr`, `sparkos-fabric` gives the ConnectX ports their addresses, and NetworkManager
+leaves those ports alone. The onboard Ethernet port keeps DGX OS's NetworkManager profile. Each
+physical ConnectX port shows up as one netdev per PCI root, and every netdev gets an address on its
+own root's subnet, so one cable carries both roots. lldpd names what each cable reaches:
+
+| The cable reaches | Root 1 | Root 2 |
+|---|---|---|
+| the switch | `10.100.H.L/16` | `10.101.H.L/16` |
+| another box running `sparkos-fabric` | a `/31` in `10.110.0.0/16` | a `/31` in `10.111.0.0/16` |
+
+`H.L` is the box's id: the last two bytes of its LAN port's MAC, the same digits as a `gx10-XXXX`
+name, so `gx10-9722` is `10.100.151.34`. A direct cable's `/31` is placed by a hash of the two
+ids, so both ends work out the same subnet, and the lower id takes the even address. Each box
+advertises its id over LLDP as `sparkos-fabric XXXX`. A neighbour that advertises bridging but is
+neither tagged nor a Linux host is the switch. Recabling moves the addresses within a few seconds of
+LLDP noticing, and a port whose cable is pulled loses its address. An address goes on only when an
+ARP probe finds nobody already using it.
+
+`/etc/spark/fabric.conf`, optional, overrides the defaults (one `KEY=VALUE` a line):
+`FABRIC_ID` (hex), `FABRIC_HOST` (a host number on the switch subnets instead of the id),
+`FABRIC_SUBNETS` and `FABRIC_LINK_SUBNETS` (root 1 then root 2), `FABRIC_SWITCH` (the switch's LLDP
+system name) and `FABRIC_MTU` (default 9000). `sparkos-fabric --dry-run` prints what each netdev
+hears and the address it would take.
+
 ## Third-party software
 
 ### Tailscale
@@ -220,6 +248,8 @@ Anything specific to one fleet goes in a site layer, so fleet addresses stay out
 | `spark-dmesg-snapshot.timer` | writes dmesg, docker and systemd state to `/var/log/spark` for the agent each minute |
 | `spark-console` | cluster status on tty1; Esc to log in |
 | `sparkos-trial-revert.timer` | reverts an unconfirmed trial boot |
+| `lldpd` | names the box to its switch and directly cabled peers; `lldpctl` shows what each port is cabled to |
+| `sparkos-fabric` | ConnectX addresses from LLDP, with `--fabric-addr` only (see [Fabric addresses](#fabric-addresses)) |
 
 ## dispram
 

@@ -53,6 +53,8 @@ cp -a "$K/stack/stack.env" "$stage/etc/kindling/stack.env"
 # Port MTUs for sparkos-mtu; no file means leave those ports as DGX OS sets them.
 [ "${CONNECTX_MTU:-0}" -gt 0 ] && echo "$CONNECTX_MTU" > "$stage/etc/kindling/connectx-mtu"
 [ "${ETHERNET_MTU:-0}" -gt 0 ] && echo "$ETHERNET_MTU" > "$stage/etc/kindling/ethernet-mtu"
+# sparkos-fabric and sparkos-fabric-nm start only when this file exists.
+[ "${FABRIC_ADDR:-0}" = 1 ] && touch "$stage/etc/kindling/fabric-addr"
 if [ "${DISPRAM_VALIDATED:-0}" = 1 ]; then
   echo "DISPRAM_DRIVER=$DRIVER_UPSTREAM" > "$stage/etc/kindling/dispram.env"
 fi

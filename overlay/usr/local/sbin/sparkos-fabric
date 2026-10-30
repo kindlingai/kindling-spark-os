@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""Give every ConnectX netdev the fabric address of whatever its cable reaches, with no setup.
+
+    sparkos-fabric [--dry-run]
+
+Each physical ConnectX port shows up as one netdev per PCI root. Every netdev gets an address on a
+subnet of its own root, so one cable carries both roots, and lldpd tells what the cable reaches:
+
+- the switch: 10.100.H.L/16 on root 1 and 10.101.H.L/16 on root 2, where H.L is the box's id
+- another box running sparkos-fabric: a /31 per root at 10.110.x.y and 10.111.x.y, placed by a hash
+  of the two ids, so both ends work out the same subnet. The lower id takes the even address.
+
+The id is the last two bytes of the box's LLDP chassis MAC (its LAN port), the same digits as a
+gx10-XXXX hostname. The box advertises it as its LLDP system description, `sparkos-fabric XXXX`.
+That is how a peer box is told apart from the switch, since both advertise bridging. A neighbour
+without it that advertises bridging, and not the Station capability every Linux lldpd lists, is the
+switch. A box that does not run sparkos-fabric gets no address on a direct cable to it.
+
+An address is added only after IPv4 duplicate detection (an ARP probe) finds nobody on it. A netdev
+keeps its address through a carrier drop. It loses it when LLDP shows the cable reaching something
+else, or when the address moves to another netdev. Addresses outside the fabric subnets are left alone.
+NetworkManager leaves the ConnectX ports alone (sparkos-fabric-nm.service marks them unmanaged).
+
+/etc/spark/fabric.conf (optional, KEY=VALUE) overrides:
+  FABRIC_ID=9722                      the id, in hex
+  FABRIC_HOST=36                      host number on the switch subnets instead of the id
+  FABRIC_SUBNETS="A/16 B/16"          switch subnets, root 1 then root 2
+  FABRIC_LINK_SUBNETS="C/16 D/16"     ranges the per-link /31s come from, root 1 then root 2
+  FABRIC_SWITCH=crs812                the switch's LLDP system name, instead of "any bridge"
+  FABRIC_MTU=9000                     MTU for every ConnectX netdev
+"""
+import hashlib
+import ipaddress
+import json
+import os
+import shlex
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+DRY = "--dry-run" in sys.argv
+CONF = "/etc/spark/fabric.conf"
+TAG = "sparkos-fabric"
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def run(*cmd, check=True):
+    return subprocess.run(cmd, check=check, capture_output=True, text=True)
+
+
+def config():
+    c = {"FABRIC_SUBNETS": "10.100.0.0/16 10.101.0.0/16", "FABRIC_LINK_SUBNETS": "10.110.0.0/16 10.111.0.0/16",
+         "FABRIC_MTU": "9000"}
+    if os.path.exists(CONF):
+        for line in open(CONF):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                c[k.strip()] = " ".join(shlex.split(v))
+    return c
+
+
+def connectx():
+    """ConnectX netdevs as {name: root}, root 1 or 2 by PCI domain order."""
+    devs = {}
+    for name in os.listdir("/sys/class/net"):
+        drv = os.path.realpath(f"/sys/class/net/{name}/device/driver")
+        if os.path.basename(drv) == "mlx5_core":
+            devs[name] = os.path.basename(os.path.realpath(f"/sys/class/net/{name}/device")).split(":")[0]
+    domains = sorted(set(devs.values()))
+    return {n: domains.index(d) + 1 for n, d in devs.items() if domains.index(d) < 2}
+
+
+def carrier(name):
+    try:
+        return open(f"/sys/class/net/{name}/carrier").read().strip() == "1"
+    except OSError:
+        return False
+
+
+def lldp():
+    """(own chassis MAC, {netdev: [(name, descr, bridge)]}) from lldpd, without this box itself."""
+    local = json.loads(run("lldpcli", "-f", "json0", "show", "chassis").stdout)["local-chassis"][0]["chassis"][0]
+    mac = next((i["value"] for i in local.get("id", []) if i.get("type") == "mac"), None)
+    seen = {}
+    for iface in json.loads(run("lldpcli", "-f", "json0", "show", "neighbors").stdout)["lldp"][0].get("interface", []):
+        for ch in iface.get("chassis", []):
+            name = (ch.get("name") or [{}])[0].get("value", "")
+            descr = (ch.get("descr") or [{}])[0].get("value", "")
+            caps = {x.get("type"): x.get("enabled") for x in ch.get("capability", [])}
+            # lldpd on a Linux host lists Station even when it is off. A switch lists Bridge alone.
+            bridge = bool(caps.get("Bridge")) and "Station" not in caps
+            if any(i.get("value") == mac for i in ch.get("id", [])):
+                continue    # this box, heard through its other root on the same cable
+            seen.setdefault(iface["name"], []).append((name, descr, bridge))
+    return mac, seen
+
+
+def peer_id(descr):
+    parts = descr.split()
+    if len(parts) == 2 and parts[0] == TAG:
+        try:
+            return int(parts[1], 16)
+        except ValueError:
+            pass
+    return None
+
+
+def link_addr(net, me, peer):
+    lo, hi = sorted((me, peer))
+    slot = int.from_bytes(hashlib.sha256(f"{lo:04x}:{hi:04x}".encode()).digest()[:4], "big") % (net.num_addresses // 2)
+    base = net.network_address + 2 * slot
+    return f"{base + (0 if me == lo else 1)}/31"
+
+
+def plan(c, me, devs, seen):
+    """{netdev: address} for the cabling lldpd sees now, one netdev per (root, role)."""
+    subnets = [ipaddress.ip_network(s) for s in c["FABRIC_SUBNETS"].split()]
+    links = [ipaddress.ip_network(s) for s in c["FABRIC_LINK_SUBNETS"].split()]
+    host = int(c["FABRIC_HOST"]) if "FABRIC_HOST" in c else me
+    want, taken = {}, {}
+    for name in sorted(devs):
+        root = devs[name]
+        if not carrier(name):
+            continue
+        role = None
+        for nb, descr, bridge in seen.get(name, []):
+            pid = peer_id(descr)
+            if pid is not None:
+                role = ("peer", pid) if pid != me else role
+            elif nb == c.get("FABRIC_SWITCH") or ("FABRIC_SWITCH" not in c and bridge):
+                role = ("switch", None)
+        if role is None:
+            continue
+        if (root, role) in taken:
+            log(f"{name}: also reaches {role[0]} {role[1] or ''} on root {root}, already on {taken[root, role]}, left bare")
+            continue
+        taken[root, role] = name
+        if role[0] == "switch":
+            net = subnets[root - 1]
+            if not 0 < host < net.num_addresses - 1:
+                log(f"{name}: host {host} is not a host address in {net}, set FABRIC_ID or FABRIC_HOST")
+                continue
+            want[name] = f"{net.network_address + host}/{net.prefixlen}"
+        else:
+            want[name] = link_addr(links[root - 1], me, role[1])
+    return want, subnets + links
+
+
+def current(devs, managed):
+    have = {}
+    for a in json.loads(run("ip", "-j", "-4", "addr", "show").stdout):
+        if a["ifname"] in devs:
+            for i in a.get("addr_info", []):
+                addr = f"{i['local']}/{i['prefixlen']}"
+                if any(ipaddress.ip_address(i["local"]) in n for n in managed):
+                    have.setdefault(a["ifname"], set()).add(addr)
+    return have
+
+
+def free(name, addr, wait=1.0):
+    """IPv4 duplicate detection (RFC 5227 probe): True if nobody answers for the address on that netdev."""
+    ip = socket.inet_aton(addr.split("/")[0])
+    mac = bytes.fromhex(open(f"/sys/class/net/{name}/address").read().strip().replace(":", ""))
+    with socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0806)) as s:
+        s.bind((name, 0x0806))
+        # who-has ADDR, from 0.0.0.0, so a probe can never update anyone's ARP cache
+        s.send(b"\xff" * 6 + mac + b"\x08\x06" + struct.pack("!HHBBH", 1, 0x0800, 6, 4, 1) + mac + bytes(4)
+               + bytes(6) + ip)
+        end = time.monotonic() + wait
+        while (left := end - time.monotonic()) > 0:
+            s.settimeout(left)
+            try:
+                f = s.recv(64)
+            except socket.timeout:
+                break
+            # an ARP packet from another host claiming ADDR as its sender address
+            if len(f) >= 42 and f[22:28] != mac and f[28:32] == ip:
+                return False
+    return True
+
+
+def step(c, last):
+    devs = connectx()
+    mac, seen = lldp()
+    me = int(c["FABRIC_ID"], 16) if "FABRIC_ID" in c else int(mac.replace(":", "")[-4:], 16) if mac else None
+    if me is None:
+        log("no LLDP chassis MAC and no FABRIC_ID, waiting")
+        return last
+    if not DRY:
+        desc = f"{TAG} {me:04x}"
+        if json.loads(run("lldpcli", "-f", "json0", "show", "chassis").stdout)["local-chassis"][0]["chassis"][0] \
+                .get("descr", [{}])[0].get("value") != desc:
+            run("lldpcli", "configure", "system", "description", desc)
+        for name in devs:
+            run("ip", "link", "set", name, "up", "mtu", c["FABRIC_MTU"], check=False)
+    want, managed = plan(c, me, devs, seen)
+    have = current(devs, managed)
+    if DRY:
+        log(f"id {me:04x}; netdevs {devs}")
+        for name in sorted(devs):
+            log(f"  {name}: root {devs[name]}, neighbours {seen.get(name, [])}, has {sorted(have.get(name, []))}, "
+                f"wants {want.get(name, '-')}")
+        return want
+    # A netdev keeps its address through a carrier drop or an LLDP gap. It loses it only when LLDP shows
+    # it reaching something else, or when another netdev now wants that address (the cable moved).
+    wanted = set(want.values())
+    for name, addrs in have.items():
+        for a in addrs:
+            if (name in want and want[name] != a) or (name not in want and a in wanted):
+                run("ip", "addr", "del", a, "dev", name, check=False)
+                log(f"{name}: removed {a}")
+    for name, a in want.items():
+        if a in have.get(name, set()):
+            continue
+        if not free(name, a):
+            if last.get(name) != ("dup", a):
+                log(f"{name}: {a} is already in use on this link, not added")
+            last[name] = ("dup", a)
+            continue
+        run("ip", "addr", "add", a, "dev", name, check=False)
+        log(f"{name}: added {a}")
+        last[name] = a
+    return last
+
+
+def main():
+    c = config()
+    if DRY:
+        step(c, {})
+        return
+    last = {}
+    while True:
+        try:
+            last = step(c, last)
+        except (subprocess.CalledProcessError, OSError, KeyError, ValueError, json.JSONDecodeError) as e:
+            log(f"pass failed: {e}")
+        time.sleep(5)
+
+
+if __name__ == "__main__":
+    main()

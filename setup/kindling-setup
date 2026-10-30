@@ -9,7 +9,8 @@
 #
 # Commands:
 #   install [--flavour F] [--version V] [--site DIR] [--packages "P ..."] [--sources FILE]
-#           [--mounts "DIR ..."] [--hostname-kindling] [--connectx-mtu N] [--ethernet-mtu N] [--trial]
+#           [--mounts "DIR ..."] [--hostname-kindling] [--connectx-mtu N] [--ethernet-mtu N] [--fabric-addr]
+#           [--trial]
 #       Build an image and add it to GRUB. --trial also makes it the next boot, once. DGX OS stays
 #       the default until sparkos-promote is run from a booted image.
 #   build [--flavour F] [--version V] [--site DIR] [--packages "P ..."] [--sources FILE]
@@ -45,6 +46,10 @@
 # for 4096); a larger MTU such as 9000 stays. --ethernet-mtu N sets the onboard Ethernet ports to
 # exactly N; by default they keep DGX OS's setting. Raising an MTU needs the switch or peer to accept
 # the larger frames.
+#
+# --fabric-addr turns on sparkos-fabric: the ConnectX ports leave NetworkManager, and each netdev gets
+# the address of what its cable reaches, found by LLDP (the switch, or another box running it). See
+# overlay/usr/local/sbin/sparkos-fabric. Off by default.
 #
 # --hostname-kindling names the box kindling-XXXX under spark-os (XXXX: the last four hex digits of
 # its LAN port's MAC, as NVIDIA's gx10-XXXX), recorded in /etc/kindling-spark-os/hostname on the DGX
@@ -90,7 +95,7 @@ check_host() {
 }
 
 flavour=nvidia-64k version= site= out= trial=0 packages= sources=() mounts= hostname=
-connectx_mtu=4096 ethernet_mtu=0
+connectx_mtu=4096 ethernet_mtu=0 fabric_addr=0
 parse() {
   while [ $# -gt 0 ]; do
     case $1 in
@@ -105,6 +110,7 @@ parse() {
       --hostname-kindling) hostname=kindling; shift ;;
       --connectx-mtu) connectx_mtu=$2; shift 2 ;;
       --ethernet-mtu) ethernet_mtu=$2; shift 2 ;;
+      --fabric-addr) fabric_addr=1; shift ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -170,8 +176,9 @@ build() {
   [ ${#sources[@]} -gt 0 ] && echo "extra apt sources: ${sources[*]}"
   [ -n "$mounts" ] && echo "extra mounts:$mounts"
   echo "ConnectX RoCE MTU: ${connectx_mtu/#0/off}; Ethernet MTU: ${ethernet_mtu/#0/as DGX OS sets it}"
+  [ "$fabric_addr" = 1 ] && echo "ConnectX addresses: sparkos-fabric (LLDP)"
   OUT=$out VERSION=$version FLAVOUR=$flavour SITE=$site HOST=$host EXTRA_PACKAGES=$packages \
-    EXTRA_SOURCES="${sources[*]}" EXTRA_MOUNTS=$mounts CONNECTX_MTU=$connectx_mtu ETHERNET_MTU=$ethernet_mtu \
+    EXTRA_SOURCES="${sources[*]}" EXTRA_MOUNTS=$mounts CONNECTX_MTU=$connectx_mtu ETHERNET_MTU=$ethernet_mtu FABRIC_ADDR=$fabric_addr \
     "$K/setup/build-rootfs.sh" ||
     { clean_out; die "build failed"; }
 }

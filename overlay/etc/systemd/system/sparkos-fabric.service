@@ -1,0 +1,15 @@
+# ConnectX fabric addresses from what each cable reaches, found by LLDP (see sparkos-fabric). On only
+# in an image installed with --fabric-addr.
+[Unit]
+Description=ConnectX fabric addresses from LLDP neighbours
+ConditionPathExists=/etc/kindling/fabric-addr
+Wants=lldpd.service sparkos-fabric-nm.service
+After=lldpd.service sparkos-fabric-nm.service
+
+[Service]
+ExecStart=/usr/local/sbin/sparkos-fabric
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

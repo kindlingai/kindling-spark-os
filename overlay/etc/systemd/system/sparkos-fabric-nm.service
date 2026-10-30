@@ -1,0 +1,15 @@
+# With --fabric-addr, NetworkManager leaves the ConnectX ports to sparkos-fabric. The drop-in has to
+# exist before NetworkManager starts, and sparkos-fabric itself starts after lldpd, which is after it.
+[Unit]
+Description=Leave the ConnectX ports to sparkos-fabric
+DefaultDependencies=no
+ConditionPathExists=/etc/kindling/fabric-addr
+Before=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'mkdir -p /run/NetworkManager/conf.d && printf "[keyfile]\\nunmanaged-devices=driver:mlx5_core\\n" > /run/NetworkManager/conf.d/90-sparkos-fabric.conf'
+
+[Install]
+WantedBy=NetworkManager.service
