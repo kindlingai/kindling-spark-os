@@ -71,6 +71,8 @@ nv-docker-options
 network-manager
 wpasupplicant
 iw
+# names each cable's far end: switch port or peer box (lldpctl)
+lldpd
 openssh-server
 sudo
 ca-certificates

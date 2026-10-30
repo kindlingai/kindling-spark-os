@@ -32,6 +32,8 @@ The image carries:
 - the kernel and NVIDIA driver of one supported pair (`stacks.yaml`), signed by Canonical for
   Secure Boot
 - Docker and the NVIDIA container toolkit, RDMA and ConnectX tools, NVIDIA's DGX tuning packages
+- `lldpd`, so each box names itself to its switch and to directly cabled peers, and `lldpctl` shows
+  what each port is cabled to
 - `mentatd`, the [mentat](https://github.com/mmastrac/mentat) node daemon
 - the [spark agent](agent/): a status page and MCP tools, registered with mentat
 - `dispramd`, which lends the GPU's 2 GiB display carveout to CUDA (see [dispram](#dispram))
