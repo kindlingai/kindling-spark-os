@@ -6,8 +6,8 @@
 
 # Every outside input is pinned: mentat by image digest (the multi-arch index, so it holds on any
 # build host), open-gpu-kernel-modules by commit (stacks.yaml), py-spy by wheel hash. A tag can be moved; these cannot. The tags are there for readers.
-ARG MENTATD_IMAGE=ghcr.io/kindlingai/mentatd:0.21.0@sha256:1f70bd95160982d9e11bdd95794e04ef48928ef8a15525670431144ebb86c544
-ARG MENTAT_ARTIFACTS_IMAGE=ghcr.io/kindlingai/mentat-artifacts:0.21.0@sha256:3baf501e36da86fea74a5654d2a8afac3ab833638f6b08c31c54316143d148c3
+ARG MENTATD_IMAGE=ghcr.io/kindlingai/mentatd:0.25.0@sha256:76539c7e0498990c6dde0fbd91c6b1b1c1de0d3cee5b767a339643e9a7eeb642
+ARG MENTAT_ARTIFACTS_IMAGE=ghcr.io/kindlingai/mentat-artifacts:0.25.0@sha256:9e75b5444abd2c0a7ec9c338438718748179021dd2c9907931a1d56c77e9d1c6
 FROM ${MENTATD_IMAGE} AS mentatd
 FROM ${MENTAT_ARTIFACTS_IMAGE} AS mentat
 
