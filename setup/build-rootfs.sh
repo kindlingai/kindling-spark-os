@@ -43,6 +43,9 @@ pkgs=$( { subst "$K/setup/packages.txt" ${SITE:+$( [ -f "$SITE/packages.txt" ] &
 stage=$work/stage
 mkdir -p "$stage/usr/local/bin" "$stage/opt" "$stage/etc/kindling"
 cp -a "$K/overlay/." "$stage/"
+# A checkout made under umask 002 leaves the overlay group-writable. NetworkManager refuses to run a
+# dispatcher script that is writable by group or other, so the MTU and mentatd hooks never fire.
+chmod -R go-w "$stage"
 install -m755 "$K/mentatd/mentatd" "$K/mentatd/mentatd-probe-machine" "$stage/usr/local/bin/"
 install -m755 "$K/agent/spark-memory.py" "$stage/usr/local/bin/"
 install -d "$stage/opt/spark-agent" && cp -a "$K/agent/lib" "$stage/opt/spark-agent/lib"
