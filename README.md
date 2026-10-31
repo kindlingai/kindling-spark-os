@@ -15,7 +15,8 @@ The image is an erofs file on the DGX OS disk, and every boot starts from the sa
 
 - the initramfs mounts the image read-only under a RAM overlay
 - the initramfs copies in the box's identity: hostname, machine-id, ssh host keys, network
-  config and `/etc/spark`
+  config and `/etc/spark`. `sparkos-netsave` writes network config edits made while running
+  (nmcli, nmtui, `netplan set`) back to the DGX OS disk, so they stay at reboot.
 - systemd binds `/home`, `/srv`, `/var/log`, `/var/lib/docker`, `/var/lib/containerd`,
   `/var/lib/spark-watchdog` and `/var/lib/nfs` from the DGX OS disk. `--mounts` adds more.
 - `sparkos-users` copies in DGX OS's login users (uid 1000 and up) and `/etc/sudoers.d`
@@ -274,6 +275,7 @@ Anything specific to one fleet goes in a site layer, so fleet addresses stay out
 | `lldpd` | names the box to its switch and directly cabled peers; `lldpctl` shows what each port is cabled to |
 | `sparkos-fabric` | ConnectX addresses from LLDP, with `--fabric-addr` only (see [Fabric addresses](#fabric-addresses)) |
 | `sparkos-thermal` | GPU clock cap from temperature, with `--thermal-cap` only (see [GPU temperature](#gpu-temperature)) |
+| `sparkos-netsave.path` | writes nmcli and netplan edits back to the DGX OS disk, so they stay at reboot |
 
 ## dispram
 

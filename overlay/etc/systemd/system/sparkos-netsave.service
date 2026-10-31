@@ -1,0 +1,8 @@
+# Writes network config edits back to the DGX OS root (see sparkos-netsave). Started by sparkos-netsave.path.
+[Unit]
+Description=Save network config edits to the DGX OS root
+ConditionPathIsMountPoint=/run/sparkos/host
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sparkos-netsave

@@ -1,0 +1,10 @@
+# Runs sparkos-netsave when the live network config changes, so nmcli and netplan edits stay at reboot.
+[Unit]
+Description=Watch the network config for edits to save to the DGX OS root
+
+[Path]
+PathChanged=/etc/netplan
+PathChanged=/etc/NetworkManager/system-connections
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,50 @@
+#!/bin/sh
+# Write network config edits made while spark-os runs back to the DGX OS root, so they stay at reboot.
+#
+# / is a RAM overlay. At boot the initramfs copies /etc/netplan and /etc/NetworkManager/system-connections
+# in from the DGX OS root, and keeps a copy of both as they stood then in /run/sparkos/netbase. An edit
+# made here (nmcli, nmtui, netplan set; NetworkManager 1.46 keeps its profiles as
+# /etc/netplan/90-NM-<uuid>.yaml) lands only in RAM. sparkos-netsave.path runs this when either
+# directory changes, and each file is compared with the boot copy:
+#   - a file added or changed here is written to the DGX OS root
+#   - a file deleted here is deleted there. A file the image ships comes back at the next boot.
+#   - a file not changed here is left alone, so an edit made on the DGX OS root itself
+#     (/run/sparkos/host/etc/...) still applies at the next boot
+# DGX OS reads the same files, so the edits apply there too.
+set -eu
+# SPARKOS_HOST, SPARKOS_BASE and SPARKOS_ROOT point it at copies, for testing.
+H=${SPARKOS_HOST:-/run/sparkos/host}
+B=${SPARKOS_BASE:-/run/sparkos/netbase}
+R=${SPARKOS_ROOT:-}
+[ -d "$B" ] || { echo "sparkos-netsave: no boot copy at $B, nothing saved" >&2; exit 0; }
+
+save_once() {
+	for d in etc/netplan etc/NetworkManager/system-connections; do
+		live=$R/$d base=$B/$d disk=$H/$d
+		mkdir -p "$base"
+		if [ -d "$live" ]; then
+			find "$live" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | while IFS= read -r f; do
+				cmp -s "$live/$f" "$base/$f" && continue
+				mkdir -p "$disk"
+				# A dot name: neither netplan nor NetworkManager reads a half-written file.
+				cp -p "$live/$f" "$disk/.$f.netsave"
+				mv -f "$disk/.$f.netsave" "$disk/$f"
+				cp -p "$live/$f" "$base/$f"
+				echo "sparkos-netsave: saved /$d/$f"
+			done
+		fi
+		find "$base" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | while IFS= read -r f; do
+			[ -e "$live/$f" ] && continue
+			rm -f "$disk/$f" "$base/$f"
+			echo "sparkos-netsave: removed /$d/$f"
+		done
+	done
+}
+
+# An edit can land while this runs (NetworkManager writes a temporary file, then renames it), so
+# go again until a pass changes nothing.
+for i in 1 2 3 4 5; do
+	out=$(save_once)
+	[ -n "$out" ] || exit 0
+	echo "$out"
+done
