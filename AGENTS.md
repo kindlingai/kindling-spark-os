@@ -63,7 +63,8 @@ lends the GB10's unused 2 GiB display carveout to CUDA.
 4. On boot, `overlay/etc/initramfs-tools/scripts/local-bottom/sparkos` moves the real root to
    `/run/sparkos/host`, mounts the erofs read-only under a 4 GiB tmpfs overlay, and copies in the
    box's identity: hostname, hosts, machine-id, ssh host keys, NetworkManager and netplan
-   connections, and `/etc/spark`.
+   connections, and `/etc/spark`. It keeps a second copy of the network config as it stood at
+   boot in `/run/sparkos/netbase`, for `sparkos-netsave`.
 5. systemd starts. `sparkos-users` copies DGX OS's users and groups in, `fstab` binds the
    persistent directories, and the services start.
 
@@ -79,6 +80,10 @@ every box. A name already on the box gets `-2`, `-3`. The GRUB entry id is `spar
 - Bound from it: `/home`, `/srv`, `/var/log`, `/var/lib/docker`, `/var/lib/containerd`,
   `/var/lib/spark-watchdog`, `/var/lib/nfs`, and anything
   given with `--mounts`.
+- `/etc/netplan` and `/etc/NetworkManager/system-connections` are copies, made at boot.
+  `sparkos-netsave.path` writes each edit made while running (nmcli, nmtui, `netplan set`) back to
+  the DGX OS root, deletes included, so it stays at reboot and applies in DGX OS too. A file edited
+  on the DGX OS root directly is left alone and applies at the next boot.
 - `/etc/spark/node.env` and `agent.env` are copies, made at boot. Edit them on the DGX OS root
   (`/run/sparkos/host/etc/spark/`) and reboot, or edit both copies.
 - `/etc/kindling/` holds the image's version, MTU settings and dispram config.

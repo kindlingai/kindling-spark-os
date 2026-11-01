@@ -42,4 +42,9 @@ for d in etc/NetworkManager/system-connections etc/netplan etc/spark; do
 		mkdir -p "${rootmnt}/$d" && cp -a "$S/host/$d/." "${rootmnt}/$d/"
 	fi
 done
+# The network config as it stands at boot, so sparkos-netsave can tell an edit made while running.
+for d in etc/NetworkManager/system-connections etc/netplan; do
+	mkdir -p "$S/netbase/$d"
+	[ -d "${rootmnt}/$d" ] && cp -a "${rootmnt}/$d/." "$S/netbase/$d/"
+done
 exit 0
