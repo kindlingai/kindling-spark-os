@@ -219,11 +219,15 @@ Hours of full load take a GB10 past 85 C, and one has powered itself off near 88
 | at or below the optimal temperature (default 75 C) for a minute, while the GPU is busy | up 100 MHz, then another minute |
 | any temperature while the GPU is idle, below the target | unchanged |
 
+It also reads the hottest ACPI thermal zone, which runs 6-8 C above the GPU under load. At
+`THERMAL_ZONE_LIMIT` (default 90 C) or more, the cap comes down 100 MHz for every 2 C from one below
+the limit, at most 300 MHz a step. The cap rises only while that zone is at least 5 C under its limit.
+
 Load comes in bursts, and an idle GPU sits near 45-55 C. A cap raised while idle would meet the next
 burst at full clock, so the cap only rises while the GPU works. The cap starts at 2000 MHz and never
 passes 2400 MHz. `/etc/spark/thermal.conf` overrides `THERMAL_TARGET`, `THERMAL_OPTIMAL`,
 `THERMAL_INTERVAL`, `THERMAL_MIN_MHZ`, `THERMAL_MAX_MHZ`, `THERMAL_START_MHZ`, `THERMAL_BUSY_PCT`
-(default 10%) and `THERMAL_RAISE_AFTER_S` (default 60). Stopping the service removes the cap.
+(default 10%), `THERMAL_RAISE_AFTER_S` (default 60) and `THERMAL_ZONE_LIMIT`. Stopping the service removes the cap.
 
 ## Third-party software
 

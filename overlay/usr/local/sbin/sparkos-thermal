@@ -4,11 +4,15 @@
     sparkos-thermal [--dry-run]
 
 Every THERMAL_INTERVAL seconds (default 15) it reads the GPU's temperature and utilization and moves a cap on the
-graphics clock (nvidia-smi --lock-gpu-clocks=0,CAP):
+graphics clock (nvidia-smi --lock-gpu-clocks=0,CAP). It also reads the hottest ACPI thermal zone, which runs 6-8 C
+above the GPU under load:
 
 - above THERMAL_TARGET (default 80 C): down 100 MHz for every 2 C over, at most 300 MHz a step
 - at THERMAL_TARGET + 7 C or more: straight down to THERMAL_MIN_MHZ, since a GB10 has powered itself off near 88 C
-- at or below THERMAL_OPTIMAL (default 75 C) for a minute while the GPU is busy: up 100 MHz, then another minute
+- hottest ACPI zone at THERMAL_ZONE_LIMIT (default 90 C) or more: down 100 MHz for every 2 C from one below the
+  limit, at most 300 MHz a step
+- at or below THERMAL_OPTIMAL (default 75 C) for a minute while the GPU is busy and the hottest ACPI zone is at least
+  5 C under its limit: up 100 MHz, then another minute
 - in between, or while the GPU is idle: unchanged
 
 Load on these boxes comes in bursts, and an idle GPU sits near 45-55 C, so a cap raised while idle meets the next
@@ -24,7 +28,9 @@ import time
 
 CONF = "/etc/spark/thermal.conf"
 DEFAULTS = {"THERMAL_TARGET": 80, "THERMAL_OPTIMAL": 75, "THERMAL_INTERVAL": 15, "THERMAL_MIN_MHZ": 1500,
-            "THERMAL_MAX_MHZ": 2400, "THERMAL_START_MHZ": 2000, "THERMAL_BUSY_PCT": 10, "THERMAL_RAISE_AFTER_S": 60}
+            "THERMAL_MAX_MHZ": 2400, "THERMAL_START_MHZ": 2000, "THERMAL_BUSY_PCT": 10, "THERMAL_RAISE_AFTER_S": 60,
+            "THERMAL_ZONE_LIMIT": 90}
+ZONES = "/sys/class/thermal"
 STEP = 100
 
 
@@ -44,14 +50,18 @@ def config(path=CONF):
     return c
 
 
-def decide(c, cap, temp, util, cool_since, now):
-    """The next (cap, cool_since): cool_since is when the GPU last went at or below optimal while busy, or None."""
+def decide(c, cap, temp, util, cool_since, now, zone=None):
+    """The next (cap, cool_since): cool_since is when the GPU last went at or below optimal while busy, or None.
+    zone is the hottest ACPI zone in C, or None when the box has none."""
     over = temp - c["THERMAL_TARGET"]
     if over >= 7:
         return c["THERMAL_MIN_MHZ"], None
+    if zone is not None:
+        over = max(over, zone - c["THERMAL_ZONE_LIMIT"] + 1)
     if over > 0:
         return max(c["THERMAL_MIN_MHZ"], cap - STEP * min(3, (over + 1) // 2)), None
-    if temp > c["THERMAL_OPTIMAL"] or util < c["THERMAL_BUSY_PCT"]:
+    zone_hot = zone is not None and zone > c["THERMAL_ZONE_LIMIT"] - 5
+    if temp > c["THERMAL_OPTIMAL"] or util < c["THERMAL_BUSY_PCT"] or zone_hot:
         return cap, None
     if cool_since is None:
         return cap, now
@@ -67,6 +77,21 @@ def read():
     return temp, util
 
 
+def hottest_zone(root=ZONES):
+    """The hottest ACPI thermal zone in whole C, or None if there is none or none can be read."""
+    temps = []
+    for name in os.listdir(root) if os.path.isdir(root) else []:
+        if not name.startswith("thermal_zone"):
+            continue
+        try:
+            with open(f"{root}/{name}/type") as t, open(f"{root}/{name}/temp") as v:
+                if t.read().strip() == "acpitz":
+                    temps.append(int(v.read()) // 1000)
+        except (OSError, ValueError):
+            continue
+    return max(temps, default=None)
+
+
 def lock(cap):
     subprocess.run(["nvidia-smi", f"--lock-gpu-clocks=0,{cap}"], capture_output=True, check=True)
 
@@ -78,7 +103,7 @@ def main():
     if not dry:
         lock(cap)
     print(f"cap {cap} MHz; target {c['THERMAL_TARGET']} C, optimal {c['THERMAL_OPTIMAL']} C, every "
-          f"{c['THERMAL_INTERVAL']} s", flush=True)
+          f"{c['THERMAL_INTERVAL']} s; ACPI zone limit {c['THERMAL_ZONE_LIMIT']} C", flush=True)
     while True:
         try:
             temp, util = read()
@@ -86,14 +111,16 @@ def main():
             print(f"nvidia-smi: {e}", flush=True)
             time.sleep(c["THERMAL_INTERVAL"])
             continue
-        new, cool_since = decide(c, cap, temp, util, cool_since, time.monotonic())
+        zone = hottest_zone()
+        new, cool_since = decide(c, cap, temp, util, cool_since, time.monotonic(), zone)
+        state = f"{temp} C, ACPI {zone} C, {util}% busy: cap {cap} -> {new} MHz"
         if dry:
-            print(f"{temp} C, {util}% busy: cap {cap} -> {new} MHz", flush=True)
+            print(state, flush=True)
             return
         if new != cap:
             try:
                 lock(new)
-                print(f"{temp} C, {util}% busy: cap {cap} -> {new} MHz", flush=True)
+                print(state, flush=True)
                 cap = new
             except (OSError, subprocess.CalledProcessError) as e:
                 print(f"nvidia-smi --lock-gpu-clocks=0,{new}: {e}", flush=True)
