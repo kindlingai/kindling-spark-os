@@ -81,6 +81,8 @@ rsync
 less
 vim-tiny
 python3
+# ensurepip, so `python3 -m venv` works (gr8's bare-metal setup makes its shim's venv this way)
+python3-venv
 jq
 lsof
 pciutils
