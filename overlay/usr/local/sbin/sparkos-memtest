@@ -1,0 +1,451 @@
+#!/usr/bin/env python3
+"""Test unified LPDDR5x RAM on a GB10 box and pin any bit flip to a physical address.
+
+    sudo sparkos-memtest [--gib N] [--passes 3] [--hold 2.0] [--log FILE]
+
+GB10's LPDDR5x does not report ECC or EDAC errors to Linux, so a weak DRAM cell
+can corrupt model weights silently while dmesg stays clean. This tool allocates
+most of MemAvailable across parallel workers, locks every page into physical RAM
+with mlock() so swap cannot hide faults, writes deterministic bit patterns,
+holds them in RAM to catch charge-retention decay, and checks every byte.
+
+When a byte mismatches, it translates the virtual address to a hardware physical
+address through /proc/self/pagemap, re-reads the byte three times to separate
+persistent cell decay from a transient read error, and rewrites it to check
+whether the cell accepts writes. Running as root is needed for unlimited mlock
+and physical address lookup.
+"""
+import argparse
+import ctypes
+import datetime
+import errno
+import mmap
+import multiprocessing as mp
+import os
+import resource
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+MIB = 1024 * 1024
+GIB = 1024 * 1024 * 1024
+DEFAULT_PATTERNS = (0x00, 0xFF, 0x55, 0xAA, 0x0F, 0xF0)
+DEFAULT_RESERVE_GIB = 8.0
+MIN_SAFETY_HEADROOM = 2 * GIB
+
+_LIBC = None
+
+
+def _get_libc():
+    global _LIBC
+    if _LIBC is None:
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.mlock.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        libc.mlock.restype = ctypes.c_int
+        _LIBC = libc
+    return _LIBC
+
+
+def utc_now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def parse_meminfo(path: str = "/proc/meminfo") -> dict[str, int]:
+    """Return /proc/meminfo counters in bytes."""
+    out = {}
+    with open(path) as f:
+        for line in f:
+            key, _, rest = line.partition(":")
+            parts = rest.split()
+            if parts and parts[0].isdigit():
+                unit = parts[1].lower() if len(parts) > 1 else ""
+                mult = 1024 if unit == "kb" else 1
+                out[key.strip()] = int(parts[0]) * mult
+    return out
+
+
+def parse_patterns(spec: str) -> tuple[int, ...]:
+    vals = []
+    for raw in spec.split(","):
+        tok = raw.strip()
+        if not tok:
+            continue
+        val = int(tok, 16)
+        if not 0 <= val <= 0xFF:
+            raise ValueError(f"pattern byte out of range (0x00..0xff): {tok}")
+        vals.append(val)
+    if not vals:
+        raise ValueError("pattern list must contain at least one byte")
+    return tuple(vals)
+
+
+def parse_pagemap_entry(raw: bytes, vaddr: int, page_size: int) -> int | None:
+    """Decode one 8-byte /proc/self/pagemap entry into a physical byte address."""
+    if len(raw) != 8:
+        return None
+    entry = struct.unpack("<Q", raw)[0]
+    present = (entry >> 63) & 1
+    if not present:
+        return None
+    pfn = entry & ((1 << 55) - 1)
+    if pfn == 0:
+        return None
+    return (pfn * page_size) + (vaddr % page_size)
+
+
+def virt_to_phys(vaddr: int, page_size: int | None = None, pagemap_path: str = "/proc/self/pagemap") -> int | None:
+    """Translate a virtual address to a physical address via /proc/self/pagemap (requires root)."""
+    if page_size is None:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+    vpn = vaddr // page_size
+    try:
+        with open(pagemap_path, "rb") as f:
+            f.seek(vpn * 8)
+            raw = f.read(8)
+    except OSError:
+        return None
+    return parse_pagemap_entry(raw, vaddr, page_size)
+
+
+def plan_allocation(
+    mem_avail_bytes: int,
+    req_mib: int | None,
+    workers: int,
+    reserve_gib: float = DEFAULT_RESERVE_GIB,
+    chunk_mib: int = 64,
+    force: bool = False,
+) -> tuple[int, int, int]:
+    """Return (actual_workers, per_worker_bytes, total_bytes) aligned to chunk_mib."""
+    if workers < 1:
+        raise ValueError("workers must be at least 1")
+    if chunk_mib < 1:
+        raise ValueError("chunk-mib must be at least 1")
+    chunk_bytes = chunk_mib * MIB
+
+    if req_mib is None:
+        target = int(mem_avail_bytes - reserve_gib * GIB)
+        if target < chunk_bytes:
+            raise ValueError(
+                f"available memory ({mem_avail_bytes / GIB:.2f} GiB) minus reserve "
+                f"({reserve_gib:.2f} GiB) leaves less than one {chunk_mib} MiB chunk"
+            )
+    else:
+        if req_mib < chunk_mib:
+            raise ValueError(f"requested size ({req_mib} MiB) must be at least chunk-mib ({chunk_mib} MiB)")
+        target = req_mib * MIB
+        max_safe = mem_avail_bytes - MIN_SAFETY_HEADROOM
+        if not force and target > max_safe:
+            raise ValueError(
+                f"requested {target / GIB:.2f} GiB exceeds MemAvailable minus 2 GiB headroom "
+                f"({max(0, max_safe) / GIB:.2f} GiB); stop models first or pass --force"
+            )
+
+    total_chunks = target // chunk_bytes
+    actual_workers = min(workers, total_chunks)
+    chunks_per_worker = total_chunks // actual_workers
+    per_worker_bytes = chunks_per_worker * chunk_bytes
+    total_bytes = actual_workers * per_worker_bytes
+    return actual_workers, per_worker_bytes, total_bytes
+
+
+def verify_chunk(
+    buf,
+    base_vaddr: int,
+    chunk_start: int,
+    chunk_bytes: int,
+    pat: int,
+    blk: bytes,
+    pagemap_fn=virt_to_phys,
+    max_per_chunk: int = 16,
+) -> list[dict]:
+    """Compare one chunk against blk and inspect any mismatching bytes in place."""
+    data = buf[chunk_start : chunk_start + chunk_bytes]
+    if data == blk:
+        return []
+
+    findings = []
+    for off, got in enumerate(data):
+        if got == pat:
+            continue
+        idx = chunk_start + off
+        vaddr = base_vaddr + idx
+        paddr = pagemap_fn(vaddr) if pagemap_fn is not None else None
+        rereads = [buf[idx] for _ in range(3)]
+        buf[idx] = pat
+        after_rewrite = buf[idx]
+        findings.append({
+            "ts": utc_now(),
+            "chunk_off": off,
+            "vaddr": vaddr,
+            "paddr": paddr,
+            "expected": pat,
+            "actual": got,
+            "xor": got ^ pat,
+            "rereads": rereads,
+            "after_rewrite": after_rewrite,
+        })
+        if len(findings) >= max_per_chunk:
+            break
+    return findings
+
+
+def _worker(args):
+    wid, nbytes, chunk_bytes, passes, patterns, hold_sec, use_mlock = args
+    nchunks = nbytes // chunk_bytes
+    buf = mmap.mmap(
+        -1,
+        nbytes,
+        flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS,
+        prot=mmap.PROT_READ | mmap.PROT_WRITE,
+    )
+    base_vaddr = ctypes.addressof(ctypes.c_char.from_buffer(buf))
+    mlock_ok = False
+    mlock_err = 0
+
+    try:
+        # Fault every page before locking so all anonymous pages are backed.
+        zero_blk = bytes(chunk_bytes)
+        for i in range(nchunks):
+            buf[i * chunk_bytes : (i + 1) * chunk_bytes] = zero_blk
+
+        if use_mlock:
+            ctypes.set_errno(0)
+            rc = _get_libc().mlock(ctypes.c_void_p(base_vaddr), ctypes.c_size_t(nbytes))
+            mlock_ok = (rc == 0)
+            if not mlock_ok:
+                mlock_err = ctypes.get_errno()
+
+        findings = []
+        for pno in range(passes):
+            for pat in patterns:
+                blk = bytes([pat]) * chunk_bytes
+                for i in range(nchunks):
+                    buf[i * chunk_bytes : (i + 1) * chunk_bytes] = blk
+                if hold_sec > 0:
+                    time.sleep(hold_sec)
+                for i in range(nchunks):
+                    hits = verify_chunk(buf, base_vaddr, i * chunk_bytes, chunk_bytes, pat, blk)
+                    for h in hits:
+                        h["worker"] = wid
+                        h["pass"] = pno
+                        h["chunk"] = i
+                        h["mlock_ok"] = mlock_ok
+                        findings.append(h)
+    finally:
+        buf.close()
+
+    return wid, mlock_ok, mlock_err, findings
+
+
+class _Tee:
+    def __init__(self, log_path: str | None):
+        self._fp = open(log_path, "w", encoding="utf-8") if log_path else None
+
+    def emit(self, line: str = "") -> None:
+        print(line, flush=True)
+        if self._fp is not None:
+            self._fp.write(line + "\n")
+            self._fp.flush()
+
+    def close(self) -> None:
+        if self._fp is not None:
+            self._fp.close()
+            self._fp = None
+
+
+def _read_text(path: str) -> str | None:
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _run_cmd(cmd: list[str]) -> str | None:
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if res.returncode == 0:
+            return res.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def emit_sysinfo(out: _Tee, mem: dict[str, int], page_size: int) -> None:
+    out.emit("=== sparkos-memtest ===")
+    out.emit(f"timestamp_utc: {utc_now()}")
+    out.emit(f"hostname: {socket.gethostname()}")
+    out.emit(f"page_size: {page_size}")
+    for key, path in (
+        ("product_name", "/sys/class/dmi/id/product_name"),
+        ("product_serial", "/sys/class/dmi/id/product_serial"),
+        ("bios_version", "/sys/class/dmi/id/bios_version"),
+        ("bios_date", "/sys/class/dmi/id/bios_date"),
+        ("spark_os_version", "/etc/kindling/version"),
+    ):
+        val = _read_text(path)
+        if val:
+            out.emit(f"{key}: {val}")
+
+    u = os.uname()
+    out.emit(f"kernel: {u.sysname} {u.release} {u.version} {u.machine}")
+    uptime = _run_cmd(["uptime"])
+    if uptime:
+        out.emit(f"uptime: {uptime}")
+
+    swap_used = mem.get("SwapTotal", 0) - mem.get("SwapFree", 0)
+    out.emit(
+        f"memory: total={mem.get('MemTotal', 0) / GIB:.2f} GiB "
+        f"available={mem.get('MemAvailable', 0) / GIB:.2f} GiB "
+        f"swap_used={swap_used / MIB:.1f} MiB "
+        f"hardware_corrupted={mem.get('HardwareCorrupted', 0) // 1024} kB"
+    )
+    gpu = _run_cmd([
+        "nvidia-smi",
+        "--query-gpu=name,temperature.gpu,power.draw,driver_version",
+        "--format=csv,noheader",
+    ])
+    if gpu:
+        out.emit(f"gpu: {gpu.splitlines()[0]}")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="sparkos-memtest",
+        description="Test unified LPDDR5x RAM with mlock, retention holds, and physical address logging.",
+    )
+    size = p.add_mutually_exclusive_group()
+    size.add_argument("--gib", type=float, default=None, help="total GiB to test (default: MemAvailable minus reserve)")
+    size.add_argument("--mib", type=int, default=None, help="total MiB to test (for small or quick runs)")
+    p.add_argument("--reserve-gib", type=float, default=DEFAULT_RESERVE_GIB,
+                   help=f"GiB kept free when sizing automatically (default: {DEFAULT_RESERVE_GIB:g})")
+    p.add_argument("--workers", type=int, default=min(16, os.cpu_count() or 1),
+                   help="parallel worker processes (default: up to 16)")
+    p.add_argument("--passes", type=int, default=3, help="passes over all patterns (default: 3)")
+    p.add_argument("--hold", type=float, default=2.0,
+                   help="seconds to hold each pattern before checking (default: 2.0)")
+    p.add_argument("--chunk-mib", type=int, default=64, help="chunk size in MiB (default: 64)")
+    p.add_argument("--patterns", default="00,ff,55,aa,0f,f0",
+                   help="comma-separated hex byte patterns (default: 00,ff,55,aa,0f,f0)")
+    p.add_argument("--no-mlock", action="store_true",
+                   help="skip mlock() (allows non-root runs, but swap may hide faults)")
+    p.add_argument("--force", action="store_true",
+                   help="allow an explicit size within 2 GiB of MemAvailable")
+    p.add_argument("--log", default=None, help="write a copy of the full report to this file")
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.passes < 1:
+        print("sparkos-memtest: --passes must be at least 1", file=sys.stderr)
+        return 2
+    if args.hold < 0:
+        print("sparkos-memtest: --hold cannot be negative", file=sys.stderr)
+        return 2
+
+    try:
+        patterns = parse_patterns(args.patterns)
+    except ValueError as e:
+        print(f"sparkos-memtest: {e}", file=sys.stderr)
+        return 2
+
+    req_mib = args.mib
+    if args.gib is not None:
+        if args.gib <= 0:
+            print("sparkos-memtest: --gib must be positive", file=sys.stderr)
+            return 2
+        req_mib = int(round(args.gib * 1024))
+
+    mem = parse_meminfo()
+    avail = mem.get("MemAvailable", 0)
+    try:
+        actual_workers, per_worker_bytes, total_bytes = plan_allocation(
+            avail,
+            req_mib=req_mib,
+            workers=args.workers,
+            reserve_gib=args.reserve_gib,
+            chunk_mib=args.chunk_mib,
+            force=args.force,
+        )
+    except ValueError as e:
+        print(f"sparkos-memtest: {e}", file=sys.stderr)
+        return 2
+
+    use_mlock = not args.no_mlock
+    if use_mlock:
+        try:
+            resource.setrlimit(resource.RLIMIT_MEMLOCK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+        except (OSError, ValueError):
+            pass
+
+    page_size = os.sysconf("SC_PAGE_SIZE")
+    out = _Tee(args.log)
+    try:
+        emit_sysinfo(out, mem, page_size)
+        if os.geteuid() != 0:
+            out.emit("warning: not running as root; physical addresses from /proc/self/pagemap will be unavailable")
+        out.emit(
+            f"config: workers={actual_workers} per_worker={per_worker_bytes / MIB:.0f} MiB "
+            f"total={total_bytes / GIB:.2f} GiB ({total_bytes // MIB} MiB) "
+            f"chunk={args.chunk_mib} MiB passes={args.passes} hold_sec={args.hold} "
+            f"mlock={'on' if use_mlock else 'off'} patterns={[f'0x{b:02x}' for b in patterns]}"
+        )
+
+        chunk_bytes = args.chunk_mib * MIB
+        work = [
+            (i, per_worker_bytes, chunk_bytes, args.passes, patterns, args.hold, use_mlock)
+            for i in range(actual_workers)
+        ]
+
+        t0 = time.monotonic()
+        ctx = mp.get_context("fork")
+        with ctx.Pool(actual_workers) as pool:
+            results = pool.map(_worker, work)
+        elapsed = time.monotonic() - t0
+
+        mlock_cnt = sum(1 for _, ok, _, _ in results if ok)
+        mlock_errs = sorted({err for _, ok, err, _ in results if not ok and err})
+        all_findings = []
+        for _, _, _, flist in results:
+            all_findings.extend(flist)
+
+        if use_mlock and mlock_cnt < actual_workers:
+            err_names = ", ".join(errno.errorcode.get(e, str(e)) for e in mlock_errs) or "unknown"
+            out.emit(f"warning: mlock succeeded on {mlock_cnt}/{actual_workers} workers (errno: {err_names})")
+
+        out.emit(
+            f"summary: elapsed_sec={elapsed:.1f} tested_gib={total_bytes / GIB:.2f} "
+            f"mlock_workers={mlock_cnt}/{actual_workers} bit_flip_events={len(all_findings)}"
+        )
+
+        fault_pages = set()
+        for f in all_findings:
+            if f["paddr"] is not None:
+                paddr_str = f"0x{f['paddr']:012x}"
+                fault_pages.add(f["paddr"] & ~(page_size - 1))
+            else:
+                paddr_str = "unavailable"
+            rr_str = [f"0x{x:02x}" for x in f["rereads"]]
+            out.emit(
+                f"FLIP ts={f['ts']} w={f['worker']} pass={f['pass']} pat=0x{f['expected']:02x} "
+                f"chunk={f['chunk']} off=0x{f['chunk_off']:x} vaddr=0x{f['vaddr']:012x} paddr={paddr_str} "
+                f"exp=0x{f['expected']:02x} got=0x{f['actual']:02x} xor=0x{f['xor']:02x} "
+                f"rereads={rr_str} after_rewrite=0x{f['after_rewrite']:02x} mlock={f['mlock_ok']}"
+            )
+
+        if fault_pages:
+            pages_str = ", ".join(f"0x{p:012x}" for p in sorted(fault_pages))
+            out.emit(f"fault_pages ({page_size // 1024} KiB aligned): {pages_str}")
+
+        status = "FAIL" if all_findings else "PASS"
+        out.emit(f"end: timestamp_utc={utc_now()} result={status}")
+        return 1 if all_findings else 0
+    finally:
+        out.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

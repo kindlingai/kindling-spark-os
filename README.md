@@ -229,6 +229,24 @@ passes 2400 MHz. `/etc/spark/thermal.conf` overrides `THERMAL_TARGET`, `THERMAL_
 `THERMAL_INTERVAL`, `THERMAL_MIN_MHZ`, `THERMAL_MAX_MHZ`, `THERMAL_START_MHZ`, `THERMAL_BUSY_PCT`
 (default 10%), `THERMAL_RAISE_AFTER_S` (default 60) and `THERMAL_ZONE_LIMIT`. Stopping the service removes the cap.
 
+## Memory test
+
+GB10's unified LPDDR5x does not report ECC or EDAC errors to Linux, so a weak DRAM cell can corrupt
+model weights while `dmesg` stays clean. `sparkos-memtest` sweeps most of available RAM across
+parallel workers, locks every page into physical RAM with `mlock()` so swap cannot hide faults,
+writes six bit patterns (`00`, `ff`, `55`, `aa`, `0f`, `f0`), holds each pattern in RAM to expose
+retention decay, and checks every byte.
+
+Stop models on the box so most of RAM is free, then run:
+
+    sudo sparkos-memtest --log /var/log/spark/memtest.log
+
+By default it sizes itself to `MemAvailable` minus 8 GiB across up to 16 workers for 3 passes with
+a 2 s hold (`--gib`, `--passes`, `--hold`, `--workers` and `--reserve-gib` override the defaults).
+When a byte flips, it logs the hardware physical address from `/proc/self/pagemap`, the expected
+and actual bytes, the XOR bitmask, three immediate re-reads, and a rewrite check, along with DMI
+serial and BIOS metadata for warranty claims. Exit status is `0` on pass and `1` on any bit flip.
+
 ## Third-party software
 
 ### Tailscale
